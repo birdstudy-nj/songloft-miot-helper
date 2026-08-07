@@ -1,0 +1,6 @@
+{
+  "name": "Miot Helper",
+  "plugins": [
+    "https://raw.githubusercontent.com/birdstudy-nj/songloft-miot-helper/main/plugin.json"
+  ]
+}
