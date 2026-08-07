@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>小爱语音助手 - 全能版</title>
+  <style>
+    /* 统一按键风格：白底、描边、等高(36px)、带图标 */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 36px; padding: 0 16px;
+      background: var(--md-surface, #ffffff);
+      color: var(--md-primary);
+      border: 1px solid var(--md-primary);
+      border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;
+      transition: all 0.2s; white-space: nowrap; box-sizing: border-box;
+    }
+    .btn:hover { background: var(--md-primary-container); }
+    /* 删除/危险按键专属红色描边 */
+    .btn-danger { color: var(--md-error); border-color: var(--md-error); }
+    .btn-danger:hover { background: var(--md-error-container); }
+
+    /* 统一下拉框与输入框（高度 36px） */
+    .mh-select, .mh-input {
+      width: 100%; box-sizing: border-box; padding: 8px 12px; font-size: 14px;
+      border: 1px solid var(--md-outline); border-radius: var(--md-radius-sm);
+      background: transparent; color: var(--md-on-surface); outline: none;
+      transition: border-color 0.2s; height: 36px;
+    }
+    .mh-select:focus, .mh-input:focus { border-color: var(--md-primary); border-width: 2px; padding: 7px 11px; }
+
+    /* 独立表单容器，缩紧间距使面板不那么臃肿 */
+    .mh-field { margin-bottom: 12px; }
+    .mh-field label { display: block; margin-bottom: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500; }
+
+    /* 统计信息组件（仅包裹文字，不撑满整行） */
+    .stats-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 14px; background: var(--md-surface-variant);
+      border-radius: var(--md-radius-sm); font-size: 13px; color: var(--md-on-surface);
+      margin: 0; box-sizing: border-box;
+    }
+
+    /* 标签（Tag）胶囊样式 */
+    .mh-tag-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; min-height: 2px; }
+    .mh-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--md-surface-variant); color: var(--md-on-surface); border-radius: var(--md-radius-sm); font-size: 13px; font-weight: 500; border: 1px solid var(--md-outline-variant); }
+    .mh-tag-close { cursor: pointer; color: var(--md-error); font-weight: bold; line-height: 1; margin-left: 2px; }
+    .mh-tag-close:hover { opacity: 0.7; transform: scale(1.1); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* 用于源列表的拨动开关 UI 样式 */
+    .lx-switch { position: relative; display: inline-block; width: 40px; height: 20px; flex-shrink: 0; }
+    .lx-switch input { opacity: 0; width: 0; height: 0; margin: 0; }
+    .lx-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--md-outline-variant); transition: .3s; border-radius: 20px; border: 1px solid var(--md-outline); box-sizing: border-box; }
+    .lx-switch input:checked + .lx-slider { background-color: var(--md-primary); border-color: var(--md-primary); }
+    .lx-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 1px; bottom: 1px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .lx-switch input:checked + .lx-slider:before { transform: translateX(20px); }
+
+    /* 面板基础显隐 */
+    .mh-pane { display: none; animation: fadeIn 0.3s ease; }
+    .mh-pane.active { display: block; }
+
+    /* ==========================================
+       🌟 标签栏与双向悬浮箭头核心样式
+       ========================================== */
+    .tabs-container-wrap {
+      position: relative;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--md-outline-variant);
+    }
+
+    .mh-tabs {
+      display: flex; gap: 4px;
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      margin-bottom: -1px;
+      scroll-behavior: smooth;
+      padding: 0 40px;
+    }
+    .mh-tabs::-webkit-scrollbar { display: none; }
+
+    .mh-tab {
+      flex-shrink: 0;
+      padding: 12px 18px;
+      cursor: pointer; background: transparent;
+      border: none; border-bottom: 3px solid transparent;
+      color: var(--md-on-surface-variant); font-size: 15px; font-weight: 500;
+      transition: all 0.2s;
+    }
+    .mh-tab.active {
+      color: var(--md-primary);
+      border-bottom-color: var(--md-primary);
+    }
+    .mh-tab:hover:not(.active) {
+      background: var(--md-surface-variant);
+      border-radius: 8px 8px 0 0;
+    }
+
+    /* 呼吸悬浮箭头通用样式 */
+    .scroll-arrow {
+      position: absolute;
+      top: 0; bottom: 1px;
+      width: 48px;
+      display: flex; align-items: center;
+      cursor: pointer;
+      color: var(--md-on-surface-variant);
+      transition: opacity 0.2s;
+      z-index: 2;
+    }
+
+    /* 右侧呼吸悬浮箭头 */
+    .scroll-arrow.right {
+      right: 0;
+      justify-content: flex-end;
+      padding-right: 8px;
+      background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,1) 50%);
+    }
+
+    /* 左侧呼吸悬浮箭头 */
+    .scroll-arrow.left {
+      left: 0;
+      justify-content: flex-start;
+      padding-left: 8px;
+      background: linear-gradient(to left, rgba(255,255,255,0), rgba(255,255,255,1) 50%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .scroll-arrow.right { background: linear-gradient(to right, rgba(31, 41, 55, 0), rgba(31, 41, 55, 1) 50%); }
+      .scroll-arrow.left { background: linear-gradient(to left, rgba(31, 41, 55, 0), rgba(31, 41, 55, 1) 50%); }
+    }
+
+    /* 箭头呼吸动画 */
+    .scroll-arrow.right svg { animation: pulseXRight 1.5s infinite; }
+    .scroll-arrow.left svg { animation: pulseXLeft 1.5s infinite; }
+
+    @keyframes pulseXRight { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
+    @keyframes pulseXLeft { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(-3px); } }
+  </style>
+</head>
+<body>
+  <div class="app-bar">
+    <h1>小爱语音助手</h1>
+  </div>
+
+  <main class="main-content">
+
+    <div class="tabs-container-wrap">
+      <div class="scroll-arrow left" id="tab-scroll-left">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </div>
+
+      <div class="mh-tabs" id="mh-tabs-scroll">
+        <button class="mh-tab active" data-target="tab-debug">诊断</button>
+        <button class="mh-tab" data-target="tab-settings">设置</button>
+        <button class="mh-tab" data-target="tab-resume">续播</button>
+        <button class="mh-tab" data-target="tab-lxmusic">LXMusic</button>
+        <button class="mh-tab" data-target="tab-musicfree">MusicFree</button>
+        <button class="mh-tab" data-target="tab-webdav">WebDAV</button>
+        <button class="mh-tab" data-target="tab-about">关于</button>
+      </div>
+
+      <div class="scroll-arrow right" id="tab-scroll-right">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </div>
+    </div>
+
+    <div id="tab-settings" class="mh-pane">
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <span>⚙️ 全局设置</span>
+          <span style="font-size: 12px; color: var(--md-primary); border: 1px solid var(--md-primary); padding: 2px 8px; border-radius: 4px; font-weight: normal; background: var(--md-surface-variant);">🛠️ 功能开发中</span>
+        </div>
+        <p class="desc" style="margin-bottom: 16px;">配置小爱语音触发后的全局回应动作与推送目标歌单。</p>
+
+        <div class="mh-field">
+          <label style="font-weight: bold; color: var(--md-on-surface);">目标推送歌单</label>
+          <input type="text" id="global-target-playlist" class="mh-input" placeholder="默认: iWebPlayer推送">
+          <p class="desc" style="margin-top: 6px; font-size: 12px;">
+            注：若保持默认的 "iWebPlayer推送"，系统每次播放都会重置该歌单；若指定其他私有歌单，则追加播放。
+          </p>
+        </div>
+
+        <div style="padding-top: 16px; border-top: 1px dashed var(--md-outline-variant); margin-top: 16px;">
+          <div class="mh-field" style="margin-bottom: 0;">
+            <label style="font-weight: bold; color: var(--md-on-surface);">前置语音提示音</label>
+            <select id="global-hit-sound" class="mh-select">
+              <option value="SongLoft_for_u.mp3">默认专属提示音 (SongLoft_for_u.mp3)</option>
+              <option value="silence">静音 (不播放任何提示)</option>
+            </select>
+            <p class="desc" style="margin-top: 6px; font-size: 12px;">
+              命中口令后立刻播放提示音，让使用者知道小爱正在卖力搜歌，缓解干等 3~4 秒的死寂感。
+            </p>
+          </div>
+        </div>
+
+        <div style="padding-top: 16px; border-top: 1px dashed var(--md-outline-variant); margin-top: 16px;">
+          <button class="btn" id="btn-save-global-settings" style="opacity: 0.5; cursor: not-allowed; pointer-events: none;" disabled>💾 保存全局设置</button>
+        </div>
+      </div>
+    </div>
+    <div id="tab-resume" class="mh-pane"><div class="card">续播功能建设中，打算支持iWebPlayer和有声书的续播...</div></div>
+    <div id="tab-musicfree" class="mh-pane"><div class="card">MusicFree 引擎建设中...</div></div>
+    <div id="tab-about" class="mh-pane"><div class="card">关于信息建设中...</div></div>
+
+    <div id="tab-lxmusic" class="mh-pane">
+
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div class="card-title" style="margin: 0;">🎙️ 小爱口令设置</div>
+          <button class="btn" id="btn-show-add-lx-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增口令</button>
+        </div>
+
+        <div id="lx-cmd-modal-mask" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.4); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
+          <div class="card" style="width: 380px; max-width: 90vw; margin: 0; box-shadow: 0 8px 24px rgba(0,0,0,0.15);">
+            <div class="card-title" style="margin-bottom: 16px;">➕ 新增口令</div>
+            <div class="mh-field">
+              <label>口令功能类型</label>
+              <select id="modal-lx-cmd-type" class="mh-select">
+                <option value="play">搜索歌单并播放</option>
+                <option value="search">搜索单曲并播放</option>
+              </select>
+            </div>
+            <div class="mh-field">
+              <label>目标平台</label>
+              <select id="modal-lx-cmd-node" class="mh-select">
+                <option value="wy">网易云音乐 (wy)</option><option value="tx">QQ音乐 (tx)</option><option value="kg">酷狗音乐 (kg)</option><option value="kw">酷我音乐 (kw)</option><option value="mg">咪咕音乐 (mg)</option>
+              </select>
+            </div>
+            <div class="mh-field">
+              <label>期望最高音质 (自动降级)</label>
+              <select id="modal-lx-cmd-quality" class="mh-select">
+                <option value="flac">无损 FLAC</option><option value="320k" selected>高品质 320k</option><option value="128k">标准 128k</option>
+              </select>
+            </div>
+            <div class="mh-field" id="lx-strategy-field">
+              <label>歌单决选策略</label>
+              <select id="modal-lx-cmd-strategy" class="mh-select">
+                <option value="first">默认第一个</option><option value="random">随机抽取</option><option value="play_count">热度优先 (最多播放)</option><option value="total">数量优先 (最多曲目)</option>
+              </select>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+              <button class="btn" id="btn-lx-cmd-cancel">❌ 取消</button>
+              <button class="btn" id="btn-lx-cmd-confirm">✅ 确认创建</button>
+            </div>
+          </div>
+        </div>
+        <div id="lx-cmd-containers"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom: 12px;">🌟 全局默认配置偏好</div>
+        <p class="desc" style="margin-bottom: 16px;">配置的参数将作为上方“默认配置”口令触发时的执行策略。</p>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <div class="mh-field" style="flex: 1; min-width: 150px;">
+            <label>默认搜索平台</label>
+            <select id="lx-def-platform" class="mh-select">
+              <option value="wy">网易云音乐 (wy)</option><option value="tx">QQ音乐 (tx)</option><option value="kg">酷狗音乐 (kg)</option><option value="kw">酷我音乐 (kw)</option><option value="mg">咪咕音乐 (mg)</option>
+            </select>
+          </div>
+          <div class="mh-field" style="flex: 1; min-width: 150px;">
+            <label>默认最高音质</label>
+            <select id="lx-def-quality" class="mh-select">
+              <option value="flac">无损 FLAC</option><option value="320k" selected>高品质 320k</option><option value="128k">标准 128k</option>
+            </select>
+          </div>
+          <div class="mh-field" style="flex: 1; min-width: 150px;">
+            <label>默认歌单策略</label>
+            <select id="lx-def-strategy" class="mh-select">
+              <option value="first">默认首个</option><option value="random">随机抽取</option><option value="play_count">热度优先</option><option value="total">数量优先</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <span>⚙️ LXMusic 源脚本管理</span>
+          <button class="btn" id="btn-lx-import" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 导入.js源</button>
+          <input type="file" id="lx-file-input" accept=".js" style="display: none;">
+        </div>
+        <p class="desc" style="margin-bottom: 12px;">导入 LXMusic 兼容的源脚本以解锁全网搜索功能。</p>
+        <div id="lx-sources-list" style="border: 1px solid var(--md-outline-variant, #ccc); border-radius: 8px; background: var(--md-surface-variant, #f9f9f9);">
+          <div style="padding: 20px; text-align: center; color: var(--md-on-surface-variant); font-size: 13px;">正在拉取...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-webdav" class="mh-pane">
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
+          <span>🎙️ 小爱口令设置</span>
+          <button class="btn" id="btn-show-add-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增口令</button>
+        </div>
+
+        <div id="cmd-modal-mask" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.4); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
+          <div class="card" style="width: 380px; max-width: 90vw; margin: 0; background: var(--md-surface, #ffffff); box-shadow: 0 8px 24px rgba(0,0,0,0.15); animation: fadeIn 0.2s ease;">
+            <div class="card-title" style="margin-bottom: 16px;">➕ 新增口令</div>
+            <div class="mh-field">
+              <label>口令功能类型</label>
+              <select id="modal-cmd-type" class="mh-select">
+                <option value="play">播放 WebDAV 歌单口令</option>
+                <option value="search">播放 WebDAV 歌曲口令</option>
+              </select>
+            </div>
+            <div class="mh-field" style="margin-bottom: 20px;">
+              <label>关联 WebDAV 节点</label>
+              <select id="modal-cmd-node" class="mh-select"></select>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: center;">
+              <button class="btn" id="btn-cmd-cancel">❌ 取消</button>
+              <button class="btn" id="btn-cmd-confirm">✅ 确认创建</button>
+            </div>
+          </div>
+        </div>
+        <div id="voice-cmd-containers"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom: 16px;">🔄 曲库索引与定时扫描</div>
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+          <select id="dav-master-select" class="mh-select" style="width: auto; min-width: 120px; height: 32px; padding: 2px 8px; margin: 0; background: transparent; font-weight: bold; color: var(--md-primary); border-color: var(--md-primary);"></select>
+          <div class="stats-badge"><span id="scan-stats-text">暂无索引数据</span></div>
+        </div>
+        <div style="margin-bottom: 16px;">
+          <button class="btn" id="btn-trigger-scan" style="width: 100%;">🔄 建立全库索引</button>
+          <p id="scan-status" class="desc" style="margin-top: 12px; color: var(--md-primary); font-weight: 500; text-align: center; margin-bottom: 0;"></p>
+        </div>
+        <div class="mh-field" style="margin-bottom: 0; padding-top: 16px; border-top: 1px dashed var(--md-outline-variant);">
+          <label style="font-size: 14px; color: var(--md-on-surface);">自动定时后台扫描</label>
+          <select id="auto-scan-select" class="mh-select">
+            <option value="0">关闭（仅手动扫描）</option><option value="6">每 6 小时扫描一次</option><option value="12">每 12 小时扫描一次</option><option value="24">每天扫描一次 (24h)</option><option value="168">每周扫描一次</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
+          <span>WebDAV 节点选择</span><button class="btn" id="btn-show-add" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增节点</button>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <select id="dav-server-select" class="mh-select" style="flex: 1; margin: 0;"></select>
+          <button class="btn" id="btn-set-default">⭐ 设为默认</button>
+          <button class="btn btn-danger" id="btn-delete" style="display:none;">🗑️ 删除</button>
+        </div>
+        <div id="dav-edit-form" style="display: none; padding-top: 12px; border-top: 1px dashed var(--md-outline-variant); margin-top: 12px;">
+          <div class="card-title" id="form-title" style="margin-bottom: 16px;">新增 WebDAV 节点</div>
+          <div class="mh-field"><label>别名 (如：阿里云盘)</label><input type="text" id="dav-name" class="mh-input"></div>
+          <div class="mh-field"><label>完整的 URL 地址</label><input type="url" id="dav-url" class="mh-input"></div>
+          <div class="mh-field"><label>账号用户名</label><input type="text" id="dav-user" class="mh-input"></div>
+          <div class="mh-field"><label>密码 / 授权应用码</label><input type="password" id="dav-pass" class="mh-input"></div>
+          <div style="display: flex; gap: 12px; align-items: center; margin-top: 12px;">
+            <button class="btn" id="btn-save">💾 保存节点</button><button class="btn" id="btn-test">⚡ 测试连通性</button><button class="btn" id="btn-cancel">❌ 取消</button>
+          </div>
+        </div>
+        <div style="padding-top: 16px; border-top: 1px dashed var(--md-outline-variant); margin-top: 16px;">
+          <div class="card-title" style="margin-bottom: 12px;">扫库根目录配置</div>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <div style="flex: 1;"><input type="text" id="dav-root-path" class="mh-input" value="/" readonly style="background: var(--md-surface-2); cursor: default;"></div>
+            <button class="btn" id="btn-browse-dir">📂 选择</button>
+          </div>
+          <div id="dav-dir-browser" style="display: none; margin-top: 12px; border: 1px solid var(--md-outline-variant); border-radius: var(--md-radius-sm); padding: 12px; background: var(--md-surface-1);">
+            <div id="wd-dir-breadcrumbs" style="font-size: 13px; margin-bottom: 12px; display: flex; overflow-x: auto; white-space: nowrap; gap: 4px; padding-bottom: 4px;"></div>
+            <ul id="wd-dir-list" style="list-style: none; padding: 0; margin: 0; max-height: 220px; overflow-y: auto; background: var(--md-surface); border: 1px solid var(--md-outline-variant); border-radius: 4px;"></ul>
+            <div style="display: flex; justify-content: flex-start; gap: 12px; align-items: center; margin-top: 12px;">
+              <button class="btn" id="btn-dir-confirm">✅ 确认选择</button><button class="btn" id="btn-dir-cancel">❌ 取消</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-debug" class="mh-pane active">
+      <div class="card" style="margin-bottom: 16px;">
+        <div class="card-title">📡 小爱语音指令拦截 (WebSocket)</div>
+        <p class="desc">实时截获并显示小爱音箱的原始语音对话指令。</p>
+        <pre id="ws-logs" style="height: 180px; color: #61dafb; background: #25232A; padding: 12px; border-radius: 8px; overflow-y: auto; font-size: 13px; margin: 0; white-space: pre-wrap;">等待语音输入...</pre>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🚀 后端执行引擎日志</div>
+        <p class="desc">实时显示搜歌、删单、建单、推送等底层执行步骤。</p>
+        <pre id="backend-logs" style="height: 350px; color: #a6e22e; background: #25232A; padding: 12px; border-radius: 8px; overflow-y: auto; font-size: 13px; margin: 0; white-space: pre-wrap;">加载中...</pre>
+      </div>
+    </div>
+  </main>
+
+  <script src="static/webdav.js"></script>
+  <script src="static/lxmusic.js"></script>
+
+  <script>
+    // 🌟 1. 负责标签页切换的底层逻辑
+    document.querySelectorAll('.mh-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.mh-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.mh-pane').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        const targetId = tab.dataset.target;
+        const targetPane = document.getElementById(targetId);
+        if (targetPane) targetPane.classList.add('active');
+
+        // Debug 面板按需连接优化
+        if (targetId === 'tab-debug') {
+            if (typeof window.startDebugSession === 'function') window.startDebugSession();
+        } else {
+            if (typeof window.stopDebugSession === 'function') window.stopDebugSession();
+        }
+      });
+    });
+
+    // 🌟 2. 处理双向“呼吸悬浮箭头”的智能显隐和点击滚动
+    document.addEventListener('DOMContentLoaded', () => {
+      const tabsEl = document.getElementById('mh-tabs-scroll');
+      const arrowRightEl = document.getElementById('tab-scroll-right');
+      const arrowLeftEl = document.getElementById('tab-scroll-left');
+
+      if (tabsEl && arrowRightEl && arrowLeftEl) {
+        const checkScroll = () => {
+          if (tabsEl.scrollWidth <= tabsEl.clientWidth + 2) {
+            arrowRightEl.style.display = 'none';
+            arrowLeftEl.style.display = 'none';
+          } else {
+            arrowRightEl.style.display = 'flex';
+            arrowLeftEl.style.display = 'flex';
+
+            if (tabsEl.scrollLeft <= 5) {
+              arrowLeftEl.style.opacity = '0';
+              arrowLeftEl.style.pointerEvents = 'none';
+            } else {
+              arrowLeftEl.style.opacity = '1';
+              arrowLeftEl.style.pointerEvents = 'auto';
+            }
+
+            if (tabsEl.scrollLeft + tabsEl.clientWidth >= tabsEl.scrollWidth - 5) {
+              arrowRightEl.style.opacity = '0';
+              arrowRightEl.style.pointerEvents = 'none';
+            } else {
+              arrowRightEl.style.opacity = '1';
+              arrowRightEl.style.pointerEvents = 'auto';
+            }
+          }
+        };
+
+        tabsEl.addEventListener('scroll', checkScroll);
+        window.addEventListener('resize', checkScroll);
+        setTimeout(checkScroll, 100);
+
+        arrowRightEl.addEventListener('click', () => {
+          tabsEl.scrollBy({ left: 150, behavior: 'smooth' });
+        });
+        arrowLeftEl.addEventListener('click', () => {
+          tabsEl.scrollBy({ left: -150, behavior: 'smooth' });
+        });
+      }
+
+      // 🌟 3. 页面初次加载时，因为默认是 Debug 页面，主动建立一次连接
+      setTimeout(() => {
+        const activeTab = document.querySelector('.mh-tab.active');
+        if (activeTab && activeTab.dataset.target === 'tab-debug') {
+            if (typeof window.startDebugSession === 'function') window.startDebugSession();
+        }
+      }, 500);
+    });
+  </script>
+</body>
+</html>
