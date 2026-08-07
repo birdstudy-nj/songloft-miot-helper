@@ -50,7 +50,7 @@
 ## 🧑‍💻 关于作者
 * GitHub: @birdstudy-nj
 
-* 项目主页: [songloft-miot-helper](https://github.com/your-username/songloft-miot-helper)
+* 项目主页: [songloft-miot-helper](https://github.com/birdstudy-nj/songloft-miot-helper)
 
 如果您觉得这个插件改善了您的听歌体验，欢迎前往项目主页点一个 ⭐ Star，您的支持是我持续优化和维护的动力！
 
