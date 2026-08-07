@@ -1,5 +1,5 @@
 {
-  "name": "Miot Helper",
+  "name": "Songloft Plugin Registry",
   "plugins": [
     "https://raw.githubusercontent.com/birdstudy-nj/songloft-miot-helper/main/plugin.json"
   ]
