@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
+  "name": "小爱语音助手",
+  "version": "0.2.0",
+  "description": "小爱音箱语音口令扩展，自定义语音搜索，播放LXMusic、WebDAV中歌单和歌曲",
+  "author": "birdstudy-nj",
+  "homepage": "",
+  "license": "Apache-2.0",
+  "icon": "icon.svg",
+  "entryPath": "miot-helper",
+  "main": "main.js",
+  "minHostVersion": "1.3.0",
+  "permissions": [
+    "storage",
+    "songs.read",
+    "songs.write",
+    "playlists.read",
+    "playlists.write",
+    "inter-plugin",
+    "command",
+    "websocket"
+  ],
+  "updateUrl": "https://raw.githubusercontent.com/birdstudy-nj/songloft-miot-helper/main/plugin.json",
+  "download_url": "https://github.com/birdstudy-nj/songloft-miot-helper/releases/download/v0.2.0/miot-helper.jsplugin.zip",
+  "entryHash": "",
+  "zipHash": ""
+}
