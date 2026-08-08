@@ -1,6 +1,7 @@
 {
-  "name": "Songloft Plugin Registry",
+  "name": "Songloft Plugin By birdstudy-nj",
   "plugins": [
-    "https://raw.githubusercontent.com/birdstudy-nj/songloft-miot-helper/main/plugin.json"
+    "https://raw.githubusercontent.com/birdstudy-nj/songloft-miot-helper/main/plugin.json",
+    "https://raw.githubusercontent.com/birdstudy-nj/songloft-lyrics-cover-helper/refs/heads/main/plugin.json"
   ]
 }
