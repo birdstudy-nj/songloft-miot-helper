@@ -97,31 +97,36 @@ async function runScanTask(version: number, hostUrl: string, token: string, davI
         }
 
         // ==========================================
-        // 🌟 扫描结束：更新统计并广播 (新版合并格式)
+        // 🌟 扫描结束：更新统计并广播 (避免二次转义)
         // ==========================================
         if (currentScanVersion === version) {
             let totalSongs = 0;
             const folders = Object.keys(resultLibrary);
             for (const folder of folders) { totalSongs += resultLibrary[folder].length; }
 
-            // 👇 新版合并曲库结构
             const compositeLib = {
                 folders: folders.length,
                 songs: totalSongs,
-                time: getFormattedTime().slice(0, 16), // 获取类似 "2026-08-07 13:16" 的时间
+                time: getFormattedTime().slice(0, 16),
                 library: resultLibrary
             };
 
             const libraryJson = JSON.stringify(compositeLib);
+
+            // 1. 本地落盘保存
             await safeStorageSet(`webdav_lib_${davId}`, libraryJson);
 
             try {
-                // 直接发送合并后的对象给 iWebPlayer，不再单独发 stats
-                await songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", { type: 'library', davId: davId, library: libraryJson });
+                // 2. 🌟 关键修复：统一使用 type: 'config' 和确切的 key 发送，与 router.post('/store') 保持绝对一致
+                await songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", {
+                    type: 'config',
+                    key: `webdav_lib_${davId}`,
+                    value: libraryJson
+                });
             } catch (e) {}
 
             scanStatus = 'completed';
-            songloft.log.info(`[WebDAV] 节点 [${davId}] 全库扫描已完成！`);
+            songloft.log.info(`[WebDAV] 节点 [${davId}] 全库扫描已完成并同步！`);
         }
     } catch (fatalErr) {
         if (currentScanVersion === version) scanStatus = 'failed';

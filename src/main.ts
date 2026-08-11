@@ -9,6 +9,188 @@ let wsClient: any = null;
 const TWIN_PLUGIN_ID = 'iwebplayer';
 
 // ==========================================
+// 🚀 全局内存缓存 (零延迟读取)
+// ==========================================
+let cachedServerHost: string = '';
+
+let cachedGlobalSettings: { targetPlaylist?: string; hitSound?: string } = {
+    targetPlaylist: 'iWebPlayer推送',
+    hitSound: 'SongLoft_for_u.a2ac34c5.mp3'
+};
+
+// ⏱️ 提示音定时器句柄映射表 (${accountId}_${deviceId})
+const hitSoundTimers = new Map<string, any>();
+const failedSoundTimers = new Map<string, any>();
+
+// 取消指定设备的所有运行定时器
+function cancelAllTimers(accountId: string, deviceId: string) {
+    const key = `${accountId}_${deviceId}`;
+    if (hitSoundTimers.has(key)) {
+        clearTimeout(hitSoundTimers.get(key));
+        hitSoundTimers.delete(key);
+    }
+    if (failedSoundTimers.has(key)) {
+        clearTimeout(failedSoundTimers.get(key));
+        failedSoundTimers.delete(key);
+    }
+}
+
+// ⏱️ 启动 8 秒前置提示音超时定时器 (满8秒仅 stop 打断，不触发失败音，后台搜索继续)
+function startHitSoundTimer(accountId: string, deviceId: string) {
+    const key = `${accountId}_${deviceId}`;
+    cancelAllTimers(accountId, deviceId);
+
+    const timer = setTimeout(async () => {
+        pushDebugLog(`⏱️ 前置提示音满 8 秒，自动下发 stop 终止打断 (后台搜索继续中)...`);
+        hitSoundTimers.delete(key);
+        await stopMiotPlayer(accountId, deviceId);
+    }, 8000);
+
+    hitSoundTimers.set(key, timer);
+}
+
+// ⏱️ 启动 5 秒失败提示音超时定时器 (满5秒自动 stop)
+function startFailedSoundTimer(accountId: string, deviceId: string) {
+    const key = `${accountId}_${deviceId}`;
+    cancelAllTimers(accountId, deviceId);
+
+    const timer = setTimeout(async () => {
+        pushDebugLog(`⏱️ 失败提示音满 5 秒，自动下发 stop 停止播放`);
+        failedSoundTimers.delete(key);
+        await stopMiotPlayer(accountId, deviceId);
+    }, 5000);
+
+    failedSoundTimers.set(key, timer);
+}
+
+// 🌐 提取公网 IP 缓存
+async function updateServerHostCache() {
+    try {
+        const hostUrl = await songloft.plugin.getHostUrl();
+        const token = await songloft.plugin.getToken();
+        const res = await fetch(`${hostUrl}/api/v1/jsplugin/miot/config`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data?.data?.server_host) {
+            cachedServerHost = data.data.server_host;
+            pushDebugLog(`🌐 SongLoft主机地址: ${cachedServerHost}`);
+        }
+    } catch (e) {
+        pushDebugLog(`⚠️ 提取SongLoft主机地址异常: ${e}`);
+    }
+}
+
+// 🛑 下发小爱音箱停止播放指令
+async function stopMiotPlayer(accountId: string, deviceId: string) {
+    try {
+        const hostUrl = await songloft.plugin.getHostUrl();
+        const token = await songloft.plugin.getToken();
+        const url = `${hostUrl}/api/v1/jsplugin/miot/player/stop?account_id=${accountId}&device_id=${deviceId}`;
+
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'X-Fetch-Timeout-Ms': '1500'  // 🌟 1.5秒强制超时，绝不长期锁死VM
+            },
+            body: JSON.stringify({ account_id: accountId, device_id: deviceId })
+        });
+
+        if (res.ok) {
+            pushDebugLog(`🛑 已下发停止指令，终止音箱播放`);
+        } else {
+            pushDebugLog(`⚠️ 下发停止指令失败 (HTTP ${res.status})`);
+        }
+    } catch (e) {
+        pushDebugLog(`⚠️ 执行停止播放异常: ${e}`);
+    }
+}
+
+// ⚠️ 播放失败提示音 (SongLoft_failed.3a76aaad.mp3) 并挂载 5 秒自动关停
+async function playFailedSound(accountId: string, deviceId: string) {
+    cancelAllTimers(accountId, deviceId);
+    const failedSoundFile = 'SongLoft_failed.3a76aaad.mp3';
+    pushDebugLog(`⚠️ 触发失败提示音: ${failedSoundFile}`);
+
+    try {
+        const hostUrl = await songloft.plugin.getHostUrl();
+        const token = await songloft.plugin.getToken();
+        const baseUrl = cachedServerHost || hostUrl;
+        const soundUrl = `${baseUrl}/api/v1/jsplugin/miot-helper/static/${failedSoundFile}`;
+        const targetApiUrl = `${hostUrl}/api/v1/jsplugin/miot/mina/play-url`;
+
+        // 启动 5 秒失败音频超时关停倒计时
+        startFailedSoundTimer(accountId, deviceId);
+
+        const res = await fetch(targetApiUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Fetch-Timeout-Ms': '2000' },
+            body: JSON.stringify({ account_id: accountId, device_id: deviceId, url: soundUrl })
+        });
+
+        if (!res.ok) {
+            pushDebugLog(`⚠️ 失败提示音播放下发失败 (HTTP ${res.status})`);
+        }
+    } catch (e) {
+        pushDebugLog(`⚠️ 播放失败提示音异常: ${e}`);
+    }
+}
+
+// 🔊 获取托管的小爱音箱名称列表
+async function getMiotDeviceNames(): Promise<string> {
+    try {
+        const hostUrl = await songloft.plugin.getHostUrl();
+        const token = await songloft.plugin.getToken();
+        const res = await fetch(`${hostUrl}/api/v1/jsplugin/miot/mina/devices`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+            const json = await res.json();
+            if (json && json.success && Array.isArray(json.data)) {
+                const deviceNames: string[] = [];
+                for (const account of json.data) {
+                    if (Array.isArray(account.devices)) {
+                        for (const dev of account.devices) {
+                            if (dev.managed === true) {
+                                let devName = dev.name || dev.alias || '未命名设备';
+                                if (dev.presence === 'offline') {
+                                    devName += '(离线)';
+                                }
+                                deviceNames.push(devName);
+                            }
+                        }
+                    }
+                }
+                if (deviceNames.length > 0) {
+                    return deviceNames.join(', ');
+                }
+            }
+        }
+    } catch (e) {}
+    return '暂无托管的小爱设备';
+}
+
+// ⚙️ 预热全局设置缓存
+async function updateGlobalSettingsCache() {
+    try {
+        const raw = await songloft.storage.get('xiaoai_global_settings');
+        if (raw) {
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (parsed && typeof parsed === 'object') {
+                cachedGlobalSettings = { ...cachedGlobalSettings, ...parsed };
+            }
+        }
+    } catch (e) {}
+}
+
+function getTargetPlaylistName(): string {
+    return cachedGlobalSettings.targetPlaylist || 'iWebPlayer推送';
+}
+
+// ==========================================
 // 📝 前端 Debug 日志流
 // ==========================================
 const debugLogs: string[] = [];
@@ -30,6 +212,52 @@ router.delete('/logs', async (req) => { debugLogs.length = 0; return jsonRespons
 async function safeStorageSet(key: string, val: string) {
     if (typeof songloft.storage.set === 'function') await songloft.storage.set(key, val);
     else await (songloft.storage as any).setItem(key, val);
+}
+
+// 🌟 秒级触发前置语音提示音 (从内存读配置，异步非阻塞发送)
+function playHitSound(accountId: string, deviceId: string) {
+    const soundFile = cachedGlobalSettings.hitSound;
+
+    // 拦截“不启用”情况
+    if (!soundFile || soundFile === '' || soundFile === 'none' || soundFile === 'disabled') {
+        pushDebugLog(`🔕 前置提示音已设置为 [不启用]，跳过打断`);
+        return;
+    }
+
+    pushDebugLog(`🔔 触发前置提示音: ${soundFile}`);
+
+    // 🌟 开启 8 秒防无限循环倒计时
+    startHitSoundTimer(accountId, deviceId);
+
+    (async () => {
+        try {
+            const hostUrl = await songloft.plugin.getHostUrl();
+            const token = await songloft.plugin.getToken();
+
+            // 优先使用动态获取的公网 server_host，取不到则降级回 hostUrl
+            const baseUrl = cachedServerHost || hostUrl;
+            const soundUrl = `${baseUrl}/api/v1/jsplugin/miot-helper/static/${soundFile}`;
+            const targetApiUrl = `${hostUrl}/api/v1/jsplugin/miot/mina/play-url`;
+
+            const payload = {
+                account_id: accountId,
+                device_id: deviceId,
+                url: soundUrl
+            };
+
+            const res = await fetch(targetApiUrl, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                pushDebugLog(`⚠️ 前置提示音播放下发失败 (HTTP ${res.status})`);
+            }
+        } catch (e) {
+            pushDebugLog(`⚠️ 播放前置提示音发生异常: ${e}`);
+        }
+    })();
 }
 
 // ==========================================
@@ -121,9 +349,15 @@ async function rebuildVoiceRoutes() {
 // 🎵 WebDAV 推流逻辑
 // ==========================================
 async function createPushPlaylistAndPlay(songs: any[], accountId: string, deviceId: string) {
-    if (!songs || songs.length === 0) { pushDebugLog('⚠️ 欲推送的歌曲列表为空，放弃建歌单'); return; }
+    if (!songs || songs.length === 0) {
+        pushDebugLog('⚠️ 欲推送的歌曲列表为空，放弃建歌单');
+        await playFailedSound(accountId, deviceId);
+        return;
+    }
 
     try {
+        const targetPlaylistName = getTargetPlaylistName();
+
         const hostUrl = await songloft.plugin.getHostUrl();
         const token = await songloft.plugin.getToken();
         const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -131,18 +365,18 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
         let oldPlaylistId: number | null = null;
         try {
             const playlists = (await songloft.playlists.list()) ?? [];
-            const found = playlists.find((p: any) => p.name === 'iWebPlayer推送');
+            const found = playlists.find((p: any) => p.name === targetPlaylistName);
             if (found) oldPlaylistId = found.id;
         } catch (e) {}
 
         if (oldPlaylistId) await fetch(`${hostUrl}/api/v1/playlists/${oldPlaylistId}`, { method: 'DELETE', headers });
 
-        pushDebugLog(`➕ 正在创建全新推送歌单...`);
-        const createPlRes = await fetch(`${hostUrl}/api/v1/playlists`, { method: 'POST', headers, body: JSON.stringify({ name: 'iWebPlayer推送', type: 'normal' }) });
+        pushDebugLog(`➕ 正在创建全新推送歌单 [${targetPlaylistName}]...`);
+        const createPlRes = await fetch(`${hostUrl}/api/v1/playlists`, { method: 'POST', headers, body: JSON.stringify({ name: targetPlaylistName, type: 'normal' }) });
         const newPlaylistId = (await createPlRes.json()).id;
 
         const songNames = songs.map(s => s.title || s.name || '未知').slice(0, 3).join(', ') + (songs.length > 3 ? ' 等' : '');
-        pushDebugLog(`🔗 正在向系统注册 ${songs.length} 首远程歌曲 (如: ${songNames})...`);
+        pushDebugLog(`🔗 正在向系统注册 ${songs.length} 首远程歌曲 (${songNames})...`);
 
         const regRes = await fetch(`${hostUrl}/api/v1/songs/remote`, { method: 'POST', headers, body: JSON.stringify(songs) });
         const songIds = ((await regRes.json()).songs || []).map((s: any) => s.id);
@@ -154,24 +388,38 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
             const totalStr = songs.length > 1 ? ` 等 ${songs.length} 首歌` : '';
             pushDebugLog(`🚀 正在呼叫小爱音箱即将播放: 《${firstSongName}》${totalStr}`);
 
+            // 🌟 即将播放正式歌曲，销毁所有前置/失败定时器
+            cancelAllTimers(accountId, deviceId);
+
             const playRes = await fetch(`${hostUrl}/api/v1/jsplugin/miot/player/play`, {
                 method: 'POST', headers, body: JSON.stringify({ account_id: accountId, device_id: deviceId, playlist_id: newPlaylistId, start_index: 0, play_mode: 'order' })
             });
             if (playRes.ok) pushDebugLog(`🎉 播放指令下发成功！尽情享受音乐吧！`);
-            else pushDebugLog(`❌ 小爱音箱播放指令下发失败 (HTTP ${playRes.status})`);
+            else {
+                pushDebugLog(`❌ 小爱音箱播放指令下发失败 (HTTP ${playRes.status})`);
+                await playFailedSound(accountId, deviceId);
+            }
+        } else {
+            await playFailedSound(accountId, deviceId);
         }
-    } catch (err) { pushDebugLog(`❌ 处理推歌异常: ` + String(err)); }
+    } catch (err) {
+        pushDebugLog(`❌ 处理推歌异常: ` + String(err));
+        await playFailedSound(accountId, deviceId);
+    }
 }
 
 // 🎯 语音口令处理总入口
 async function handleVoiceCommand(cmdType: string, engine: string, nodeName: string, rawKeyword: string, accountId: string, deviceId: string, quality?: string, strategy?: string) {
+
+    // 🌟 提取全局设定的歌单名称
+    const targetPlaylistName = getTargetPlaylistName();
+
     if (engine === 'lxmusic') {
         let actualPlatform = nodeName;
         let actualQuality = quality || '320k';
         let actualStrategy = strategy || 'first';
 
         if (nodeName === 'default') {
-            // 🌟 纯净新版：读取聚合的 lxmusic_config
             try {
                 const cfgRaw = await songloft.storage.get('lxmusic_config');
                 const cfg = typeof cfgRaw === 'string' ? JSON.parse(cfgRaw) : (cfgRaw || {});
@@ -193,27 +441,50 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
             pushDebugLog(`⚙️ 触发全局默认策略: 平台[${cnPlat}], 音质[${actualQuality}], 策略[${cnStrat}]`);
         }
 
-        await handleLxMusicCommand(cmdType, actualPlatform, rawKeyword, accountId, deviceId, actualStrategy, actualQuality, pushDebugLog);
+        try {
+            // 🌟 将 targetPlaylistName 作为参数传入
+            await handleLxMusicCommand(cmdType, actualPlatform, rawKeyword, accountId, deviceId, actualStrategy, actualQuality, targetPlaylistName, pushDebugLog);
+        } catch (e) {
+            pushDebugLog(`⚠️ LXMusic 执行异常: ${e}`);
+            await playFailedSound(accountId, deviceId);
+        }
         return;
     }
 
     if (cmdType === 'search') {
         pushDebugLog(`🔍 开始在 WebDAV 节点 [${nodeName}] 中匹配歌曲: "${rawKeyword}"`);
-        // 🌟 将 pushDebugLog 传给搜歌函数，让其能在底层打印诊断日志
         let songs = await searchWebDavSongs(nodeName, rawKeyword, pushDebugLog);
 
-        // 💡 如果返回 null，代表发生了“没建索引”等致命错误，直接熔断，不再走纠错逻辑
-        if (songs === null) return;
+        if (songs === null) {
+            await playFailedSound(accountId, deviceId);
+            return;
+        }
 
         if (songs.length === 0) {
+            pushDebugLog(`⚠️ 初始未匹配到名称包含 "${rawKeyword}" 的 WebDAV 歌曲`);
             const correction = await fetchSmartCorrection(rawKeyword);
             if (correction) {
                 pushDebugLog(`💡 云端精准重写纠错: "${rawKeyword}" -> "${correction}"`);
+                pushDebugLog(`🔄 使用纠错关键字 "${correction}" 再次搜索 WebDAV 歌曲...`);
                 songs = await searchWebDavSongs(nodeName, correction, pushDebugLog) || [];
+                if (songs.length > 0) {
+                    pushDebugLog(`🎉 纠错后成功搜索到 ${songs.length} 首 WebDAV 歌曲`);
+                } else {
+                    pushDebugLog(`❌ 纠错关键字 "${correction}" 仍未搜到任何 WebDAV 歌曲`);
+                }
+            } else {
+                pushDebugLog(`⚠️ 未能获得云端纠错建议`);
             }
+        } else {
+            pushDebugLog(`🎉 成功搜索到 ${songs.length} 首 WebDAV 歌曲`);
         }
-        if (songs && songs.length > 0) await createPushPlaylistAndPlay(songs, accountId, deviceId);
-        else pushDebugLog(`💀 彻底未搜到关于此关键字的音乐，放弃操作`);
+
+        if (songs && songs.length > 0) {
+            await createPushPlaylistAndPlay(songs, accountId, deviceId);
+        } else {
+            pushDebugLog(`💀 彻底未搜到关于此关键字的音乐，放弃操作`);
+            await playFailedSound(accountId, deviceId); // 🌟 搜歌彻底失败，触发失败音
+        }
 
     } else if (cmdType === 'play') {
         pushDebugLog(`📂 开始在 WebDAV 节点 [${nodeName}] 中匹配歌单: "${rawKeyword}"`);
@@ -235,13 +506,17 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
                 }
             } catch (e) { realNode = ''; }
         }
-        if (!realNode) { pushDebugLog(`⚠️ 未配置默认 WebDAV 节点，熔断`); return; }
+        if (!realNode) {
+            pushDebugLog(`⚠️ 未配置默认 WebDAV 节点，熔断`);
+            await playFailedSound(accountId, deviceId);
+            return;
+        }
 
         const libRaw = await songloft.storage.get(`webdav_lib_${realNode}`);
 
-        // 🌟 核心改进：当没有曲库时，大声在控制台喊出来，而不是默默退出！
         if (!libRaw) {
             pushDebugLog(`⚠️ WebDAV 节点 [${realNode}] 尚未建立曲库索引，请前往面板点击【建立全库索引】！`);
+            await playFailedSound(accountId, deviceId);
             return;
         }
 
@@ -250,6 +525,7 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
 
         if (Object.keys(library).length === 0) {
             pushDebugLog(`⚠️ WebDAV 节点 [${realNode}] 曲库数据为空，请前往面板检查路径并重新扫描！`);
+            await playFailedSound(accountId, deviceId);
             return;
         }
 
@@ -260,32 +536,62 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         };
 
         let result = findFolderSongs(rawKeyword);
+
         if (result.songs.length === 0) {
+            pushDebugLog(`⚠️ 初始未匹配到名称包含 "${rawKeyword}" 的 WebDAV 歌单`);
             const correction = await fetchSmartCorrection(rawKeyword);
             if (correction) {
                 pushDebugLog(`💡 云端精准重写纠错: "${rawKeyword}" -> "${correction}"`);
+                pushDebugLog(`🔄 使用纠错关键字 "${correction}" 再次匹配 WebDAV 歌单...`);
                 result = findFolderSongs(correction);
+                if (result.songs.length > 0) {
+                    pushDebugLog(`🎉 纠错后成功匹配到歌单: [${result.folder}] (含 ${result.songs.length} 首歌曲)`);
+                } else {
+                    pushDebugLog(`❌ 纠错关键字 "${correction}" 仍未找到匹配的 WebDAV 歌单`);
+                }
+            } else {
+                pushDebugLog(`⚠️ 未能获得云端纠错建议`);
             }
+        } else {
+            pushDebugLog(`🎉 成功匹配到歌单: [${result.folder}] (含 ${result.songs.length} 首歌曲)`);
         }
 
         if (result.songs.length > 0) {
             let matchedSongs = result.songs;
-            if (matchedSongs.length > 500) matchedSongs = matchedSongs.slice(0, 500);
+            if (matchedSongs.length > 500) {
+                pushDebugLog(`⚠️ 该歌单曲目数超过 500 首，已自动截取前 500 首`);
+                matchedSongs = matchedSongs.slice(0, 500);
+            }
             await createPushPlaylistAndPlay(matchedSongs, accountId, deviceId);
-        } else pushDebugLog(`💀 彻底未找到匹配的歌单，放弃操作`);
+        } else {
+            pushDebugLog(`💀 彻底未找到匹配的歌单，放弃操作`);
+            await playFailedSound(accountId, deviceId); // 🌟 匹配歌单失败，触发失败音
+        }
     }
 }
 
 // === 初始化 ===
 async function onInit(): Promise<void> {
     pushDebugLog('🟢 小爱语音助手后端引擎已启动');
+
+    await updateGlobalSettingsCache(); // 预热全局设置到内存
+    await updateServerHostCache();     // 预热公网 IP 到内存
+
+    const deviceNames = await getMiotDeviceNames();
+    pushDebugLog(`🔊 当前受控设备: [${deviceNames}]`);
+
     await rebuildVoiceRoutes();
+    pushDebugLog('========================================');
+
+    // 定时任务每 24 小时自动刷新一次 IP
+    setInterval(() => {
+        updateServerHostCache().catch(() => {});
+    }, 24 * 60 * 60 * 1000);
 
     songloft.comm.onMessage("sync_webdav_data", async (payload, from) => {
         if (from !== TWIN_PLUGIN_ID) return;
         try {
             if (payload.type === 'config') {
-                // 🌟 反向同步映射：iwebplayer.webdav 存入本地应叫 webdav_config
                 let localKey = payload.key;
                 if (localKey === 'iwebplayer.webdav') localKey = 'webdav_config';
 
@@ -293,7 +599,6 @@ async function onInit(): Promise<void> {
                 if (localKey === 'xiaoai_dav_configs' || localKey === 'xiaoai_lx_configs') rebuildVoiceRoutes();
             }
             else if (payload.type === 'library' && payload.davId) {
-                // 🌟 新版曲库格式直接全量覆盖落盘
                 await safeStorageSet(`webdav_lib_${payload.davId}`, typeof payload.library === 'string' ? payload.library : JSON.stringify(payload.library));
             }
         } catch (e) {}
@@ -318,11 +623,19 @@ async function onInit(): Promise<void> {
                                 if (fullText.startsWith(cmdPrefix)) {
                                     const target = voiceRoutes[cmdPrefix];
                                     const keyword = fullText.replace(cmdPrefix, '').trim();
-                                    pushDebugLog(`🗣️ 听到指令: "${fullText}"`);
 
                                     if (keyword) {
+                                        // 🌟 1. 输出命中口令日志
+                                        pushDebugLog(`🎯 命中口令词: [${cmdPrefix}], 完整指令: "${fullText}"`);
+
+                                        // 🌟 2. 从内存读配置，并发非阻塞下发打断音频，启动 8 秒倒计时
+                                        playHitSound(msg.data.account_id, msg.data.device_id);
+
+                                        // 🌟 3. 并行开始搜歌推流
                                         handleVoiceCommand(target.type, target.engine, target.node, keyword, msg.data.account_id, msg.data.device_id, target.quality, target.strategy)
-                                            .catch(() => {})
+                                            .catch(async () => {
+                                                await playFailedSound(msg.data.account_id, msg.data.device_id);
+                                            })
                                             .finally(() => {
                                                 pushDebugLog('========================================');
                                             });
@@ -364,9 +677,12 @@ router.post('/store', async (req) => {
 
         await safeStorageSet(key, value);
 
+        if (key === 'xiaoai_global_settings') {
+            await updateGlobalSettingsCache(); // 🌟 前端更改设置时立刻刷新内存
+        }
+
         if (key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs') rebuildVoiceRoutes();
 
-        // 🌟 根据规范推送给 iWebPlayer，动态改名
         let syncKey = key;
         if (key === 'webdav_config') syncKey = 'iwebplayer.webdav';
 

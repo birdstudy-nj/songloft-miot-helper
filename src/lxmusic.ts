@@ -21,7 +21,8 @@ function parsePlayCount(str: string): number {
     return isNaN(num) ? 0 : num;
 }
 
-async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId: string, logFn: (msg: string) => void) {
+// 🌟 接收外部传入的 targetPlaylistName
+async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId: string, targetPlaylistName: string, logFn: (msg: string) => void) {
     if (!lxSongs || lxSongs.length === 0) { logFn('⚠️ LXMusic 导入列表为空'); return; }
 
     try {
@@ -32,22 +33,22 @@ async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId:
         let oldPlaylistId: number | null = null;
         try {
             const playlists = (await songloft.playlists.list()) ?? [];
-            const found = playlists.find((p: any) => p.name === 'iWebPlayer推送');
+            const found = playlists.find((p: any) => p.name === targetPlaylistName);
             if (found) oldPlaylistId = found.id;
         } catch (e) {}
 
         if (oldPlaylistId) {
-            logFn(`🗑️ 找到旧推送歌单 (ID: ${oldPlaylistId})，正在清理...`);
+            logFn(`🗑️ 找到旧推送歌单 [${targetPlaylistName}](ID: ${oldPlaylistId})，正在清理...`);
             await fetch(`${hostUrl}/api/v1/playlists/${oldPlaylistId}`, { method: 'DELETE', headers });
         }
 
-        logFn(`➕ 正在创建全新推送歌单...`);
-        const createPlRes = await fetch(`${hostUrl}/api/v1/playlists`, { method: 'POST', headers, body: JSON.stringify({ name: 'iWebPlayer推送', type: 'normal' }) });
+        logFn(`➕ 正在创建全新推送歌单 [${targetPlaylistName}]...`);
+        const createPlRes = await fetch(`${hostUrl}/api/v1/playlists`, { method: 'POST', headers, body: JSON.stringify({ name: targetPlaylistName, type: 'normal' }) });
         if (!createPlRes.ok) throw new Error(`新建歌单被拒绝`);
         const newPlaylistId = (await createPlRes.json()).id;
 
         const songNames = lxSongs.map(s => s.name || s.title || '未知').slice(0, 3).join(', ') + (lxSongs.length > 3 ? ' 等' : '');
-        logFn(`🔗 正在转存 ${lxSongs.length} 首歌曲 (如: ${songNames})...`);
+        logFn(`🔗 正在转存 ${lxSongs.length} 首歌曲 (${songNames})...`);
 
         const importRes = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/songs/import`, {
             method: 'POST', headers, body: JSON.stringify({ songs: lxSongs, playlist_id: String(newPlaylistId), new_playlist_name: "" })
@@ -57,7 +58,6 @@ async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId:
         const importData = await importRes.json();
         logFn(`✅ 成功导入并绑定 ${importData?.data?.success || 0} 首歌进歌单！`);
 
-        // 🌟 提取第一首歌，并修改文案
         const firstSongName = lxSongs[0]?.name || lxSongs[0]?.title || '未知歌曲';
         const totalStr = lxSongs.length > 1 ? ` 等 ${lxSongs.length} 首歌` : '';
         logFn(`🚀 正在呼叫小爱音箱即将播放: 《${firstSongName}》${totalStr}`);
@@ -71,7 +71,8 @@ async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId:
     } catch (err) { logFn(`❌ LXMusic 推歌异常: ` + String(err)); }
 }
 
-export async function handleLxMusicCommand(cmdType: string, platform: string, keyword: string, accountId: string, deviceId: string, strategy: string, targetQuality: string, logFn: (msg: string) => void) {
+// 🌟 接收外部传入的 targetPlaylistName，并传给 importLxMusicAndPlay
+export async function handleLxMusicCommand(cmdType: string, platform: string, keyword: string, accountId: string, deviceId: string, strategy: string, targetQuality: string, targetPlaylistName: string, logFn: (msg: string) => void) {
     const hostUrl = await songloft.plugin.getHostUrl();
     const token = await songloft.plugin.getToken();
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -144,6 +145,7 @@ export async function handleLxMusicCommand(cmdType: string, platform: string, ke
     }
 
     if (lxSongsToImport.length > 0) {
-        await importLxMusicAndPlay(lxSongsToImport, accountId, deviceId, logFn);
+        // 🌟 传入目标歌单名
+        await importLxMusicAndPlay(lxSongsToImport, accountId, deviceId, targetPlaylistName, logFn);
     }
 }
