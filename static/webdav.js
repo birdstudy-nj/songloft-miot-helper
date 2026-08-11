@@ -57,7 +57,7 @@
       let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 6px;">
         <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">${cfg.label}</label>`;
       if (!isDefault) {
-        titleHtml += `<button class="btn btn-danger" style="height: 24px; padding: 0 8px; font-size: 12px;" onclick="window._deleteCmdGroup('${cfg.type}', '${cfg.node}')">🗑️ 删除此组</button>`;
+        titleHtml += `<button class="mh-btn mh-btn-danger" style="height: 24px; padding: 0 8px; font-size: 12px;" onclick="window._deleteCmdGroup('${cfg.type}', '${cfg.node}')">🗑️ 删除此组</button>`;
       }
       titleHtml += `</div>`;
 
@@ -68,7 +68,7 @@
         <div id="tags-${mapKey}" class="mh-tag-container"></div>
         <div style="display: flex; gap: 12px; align-items: center;">
           <input type="text" id="input-${mapKey}" class="mh-input" placeholder="${placeholderText}">
-          <button class="btn" id="btn-add-${mapKey}">➕ 添加</button>
+          <button class="mh-btn" id="btn-add-${mapKey}">➕ 添加</button>
         </div>
       `;
 

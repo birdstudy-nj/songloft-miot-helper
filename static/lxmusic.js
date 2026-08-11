@@ -71,7 +71,7 @@
         ${badgeHtml}`;
 
       if (!cfg.isDefault) {
-          titleHtml += `<button class="btn btn-danger" style="height: 24px; padding: 0 8px; font-size: 12px;" onclick="window._deleteLxCmdGroup('${cfg.type}', '${cfg.node}')">🗑️ 删除此组</button>`;
+          titleHtml += `<button class="mh-btn mh-btn-danger" style="height: 24px; padding: 0 8px; font-size: 12px;" onclick="window._deleteLxCmdGroup('${cfg.type}', '${cfg.node}')">🗑️ 删除此组</button>`;
       }
       titleHtml += `</div>`;
 
@@ -80,7 +80,7 @@
         <div id="lx-tags-${mapKey}" class="mh-tag-container"></div>
         <div style="display: flex; gap: 12px; align-items: center;">
           <input type="text" id="lx-input-${mapKey}" class="mh-input" placeholder="输入口令，如：全网${typeName}">
-          <button class="btn" id="lx-btn-add-${mapKey}">➕ 添加</button>
+          <button class="mh-btn" id="lx-btn-add-${mapKey}">➕ 添加</button>
         </div>
       `;
 
@@ -224,7 +224,7 @@
               <input type="checkbox" class="lx-toggle-source" data-id="${src.id}" ${src.enabled ? 'checked' : ''}>
               <span class="lx-slider"></span>
             </label>
-            <button class="btn btn-danger btn-delete-lx-source" data-id="${src.id}" style="height: 24px; padding: 0 8px; font-size: 12px; border:none; background:transparent;">🗑️</button>
+            <button class="mh-source-del-btn" data-id="${src.id}" style="height: 24px; padding: 0 8px; font-size: 12px; border:none; background:transparent;">🗑️</button>
           </div>
         </div>
         `;
