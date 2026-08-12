@@ -1,6 +1,6 @@
 {
   "name": "miot-helper",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "小爱音箱语音口令扩展，自定义语音搜索，播放LXMusic、WebDAV中歌单和歌曲",
   "private": true,
   "scripts": {
