@@ -272,7 +272,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.0</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.1</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -646,6 +646,92 @@
       }
     }, 500);
   });
+
+  /* ==========================================
+     前端独立获取受控设备列表 (自动嵌入日志框第一行)
+     ========================================== */
+  let cachedDeviceStr = '';
+
+  // 1. 抓取设备列表数据
+  async function fetchAndLogDeviceNames() {
+    try {
+      const token = getAuthToken();
+      if (!token) return;
+
+      const res = await fetch('/api/v1/jsplugin/miot/mina/devices', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.success && Array.isArray(json.data)) {
+          const deviceNames = [];
+          for (const account of json.data) {
+            if (Array.isArray(account.devices)) {
+              for (const dev of account.devices) {
+                if (dev.managed === true) {
+                  let devName = dev.name || dev.alias || '未命名设备';
+                  if (dev.presence === 'offline') devName += '(离线)';
+                  deviceNames.push(devName);
+                }
+              }
+            }
+          }
+          cachedDeviceStr = deviceNames.length > 0 ? deviceNames.join(', ') : '暂无托管的小爱设备';
+
+          // 获取成功后，立刻尝试贴入日志框
+          applyDeviceLogToPre();
+        }
+      }
+    } catch (e) {
+      console.warn("前端获取设备列表异常", e);
+    }
+  }
+
+  // 2. 提取第一条日志的时间，并将设备信息插入为日志第一行
+  function applyDeviceLogToPre() {
+    if (!cachedDeviceStr) return;
+    const logEl = document.getElementById('backend-logs');
+    if (!logEl) return;
+
+    const rawText = logEl.innerText || '';
+    // 如果已经贴过了，就不重复贴
+    if (rawText.includes('🔊 当前受控设备:')) return;
+
+    // 匹配日志中第一条形如 [17:00:25] 的时间戳
+    const match = rawText.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+    if (!match) return; // 后端日志还没加载出来时先不贴
+
+    const timeStr = match[1]; // 复制第一条记录的时间
+    const deviceLine = `[${timeStr}] 🔊 当前受控设备: [${cachedDeviceStr}]`;
+
+    // 拼接在最前面
+    logEl.innerText = deviceLine + '\n' + rawText;
+  }
+
+  // 3. 监听 #backend-logs 内容变化 (每2秒轮询刷新时，自动补上设备日志)
+  const logObserver = new MutationObserver(() => {
+    // 暂时断开监听，防止修改 innerText 时触发死循环
+    logObserver.disconnect();
+
+    applyDeviceLogToPre();
+
+    // 重新挂载监听
+    const logEl = document.getElementById('backend-logs');
+    if (logEl) {
+      logObserver.observe(logEl, { childList: true, characterData: true, subtree: true });
+    }
+  });
+
+  // 页面加载绑定
+  document.addEventListener('DOMContentLoaded', () => {
+    const logEl = document.getElementById('backend-logs');
+    if (logEl) {
+      logObserver.observe(logEl, { childList: true, characterData: true, subtree: true });
+    }
+    setTimeout(fetchAndLogDeviceNames, 1000);
+  });
+
   </script>
 </body>
 </html>
