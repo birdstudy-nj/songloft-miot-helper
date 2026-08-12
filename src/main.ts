@@ -63,22 +63,65 @@ function startFailedSoundTimer(accountId: string, deviceId: string) {
     failedSoundTimers.set(key, timer);
 }
 
-// 🌐 提取公网 IP 缓存
+// ==========================================
+// 🌐 提取公网 IP 缓存 (后台定时抓取守护进程)
+// ==========================================
 async function updateServerHostCache() {
     try {
         const hostUrl = await songloft.plugin.getHostUrl();
         const token = await songloft.plugin.getToken();
         const res = await fetch(`${hostUrl}/api/v1/jsplugin/miot/config`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'X-Fetch-Timeout-Ms': '3000' // 🌟 加上超时防卡死
+            }
         });
-        const data = await res.json();
-        if (data?.data?.server_host) {
-            cachedServerHost = data.data.server_host;
-            pushDebugLog(`🌐 SongLoft主机地址: ${cachedServerHost}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data?.data?.server_host) {
+                cachedServerHost = data.data.server_host;
+                // 静默更新，不干扰主干日志
+            }
         }
     } catch (e) {
-        pushDebugLog(`⚠️ 提取SongLoft主机地址异常: ${e}`);
+        // 后台静默刷新，失败默默回退
     }
+}
+
+// 🌟 独立封装的 IP 刷新守护进程
+function startServerHostDaemon() {
+    // 延迟 30 秒再进行首次 IP 拉取，完美避开启动期的宿主锁竞争死锁
+    setTimeout(() => {
+        updateServerHostCache().catch(() => {});
+    }, 30 * 1000);
+
+    // 定时任务每 24 小时自动静默刷新一次 IP
+    setInterval(() => {
+        updateServerHostCache().catch(() => {});
+    }, 24 * 60 * 60 * 1000);
+}
+
+// ==========================================
+// 📡 插件间数据同步消息监听器
+// ==========================================
+function setupCommSyncListeners() {
+    songloft.comm.onMessage("sync_webdav_data", async (payload, from) => {
+        if (from !== TWIN_PLUGIN_ID) return;
+        try {
+            if (payload.type === 'config') {
+                let localKey = payload.key;
+                if (localKey === 'iwebplayer.webdav') localKey = 'webdav_config';
+
+                await safeStorageSet(localKey, payload.value);
+                if (localKey === 'xiaoai_dav_configs' || localKey === 'xiaoai_lx_configs') {
+                    rebuildVoiceRoutes();
+                }
+            }
+            else if (payload.type === 'library' && payload.davId) {
+                await safeStorageSet(`webdav_lib_${payload.davId}`, typeof payload.library === 'string' ? payload.library : JSON.stringify(payload.library));
+            }
+        } catch (e) {}
+    });
 }
 
 // 🛑 下发小爱音箱停止播放指令
@@ -136,41 +179,6 @@ async function playFailedSound(accountId: string, deviceId: string) {
     } catch (e) {
         pushDebugLog(`⚠️ 播放失败提示音异常: ${e}`);
     }
-}
-
-// 🔊 获取托管的小爱音箱名称列表
-async function getMiotDeviceNames(): Promise<string> {
-    try {
-        const hostUrl = await songloft.plugin.getHostUrl();
-        const token = await songloft.plugin.getToken();
-        const res = await fetch(`${hostUrl}/api/v1/jsplugin/miot/mina/devices`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (res.ok) {
-            const json = await res.json();
-            if (json && json.success && Array.isArray(json.data)) {
-                const deviceNames: string[] = [];
-                for (const account of json.data) {
-                    if (Array.isArray(account.devices)) {
-                        for (const dev of account.devices) {
-                            if (dev.managed === true) {
-                                let devName = dev.name || dev.alias || '未命名设备';
-                                if (dev.presence === 'offline') {
-                                    devName += '(离线)';
-                                }
-                                deviceNames.push(devName);
-                            }
-                        }
-                    }
-                }
-                if (deviceNames.length > 0) {
-                    return deviceNames.join(', ');
-                }
-            }
-        }
-    } catch (e) {}
-    return '暂无托管的小爱设备';
 }
 
 // ⚙️ 预热全局设置缓存
@@ -443,7 +451,10 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
 
         try {
             // 🌟 将 targetPlaylistName 作为参数传入
-            await handleLxMusicCommand(cmdType, actualPlatform, rawKeyword, accountId, deviceId, actualStrategy, actualQuality, targetPlaylistName, pushDebugLog);
+            await handleLxMusicCommand(
+                cmdType, actualPlatform, rawKeyword, accountId, deviceId, actualStrategy, actualQuality, targetPlaylistName, pushDebugLog,
+                () => cancelAllTimers(accountId, deviceId)
+            );
         } catch (e) {
             pushDebugLog(`⚠️ LXMusic 执行异常: ${e}`);
             await playFailedSound(accountId, deviceId);
@@ -570,47 +581,41 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
     }
 }
 
-// === 初始化 ===
-async function onInit(): Promise<void> {
-    pushDebugLog('🟢 小爱语音助手后端引擎已启动');
+// ==========================================
+// 🔌 WebSocket 连接与断线重连守护
+// ==========================================
+let reconnectTimer: any = null;
 
-    await updateGlobalSettingsCache(); // 预热全局设置到内存
-    await updateServerHostCache();     // 预热公网 IP 到内存
+function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectWebSocket();
+    }, 5000); // 5秒后重连，防止网络抖动导致的无限密集重连死循环
+}
 
-    const deviceNames = await getMiotDeviceNames();
-    pushDebugLog(`🔊 当前受控设备: [${deviceNames}]`);
-
-    await rebuildVoiceRoutes();
-    pushDebugLog('========================================');
-
-    // 定时任务每 24 小时自动刷新一次 IP
-    setInterval(() => {
-        updateServerHostCache().catch(() => {});
-    }, 24 * 60 * 60 * 1000);
-
-    songloft.comm.onMessage("sync_webdav_data", async (payload, from) => {
-        if (from !== TWIN_PLUGIN_ID) return;
-        try {
-            if (payload.type === 'config') {
-                let localKey = payload.key;
-                if (localKey === 'iwebplayer.webdav') localKey = 'webdav_config';
-
-                await safeStorageSet(localKey, payload.value);
-                if (localKey === 'xiaoai_dav_configs' || localKey === 'xiaoai_lx_configs') rebuildVoiceRoutes();
-            }
-            else if (payload.type === 'library' && payload.davId) {
-                await safeStorageSet(`webdav_lib_${payload.davId}`, typeof payload.library === 'string' ? payload.library : JSON.stringify(payload.library));
-            }
-        } catch (e) {}
-    });
-
+async function connectWebSocket() {
     try {
+        if (wsClient) {
+            wsClient.close();
+            wsClient = null;
+        }
+
         const hostUrl = await songloft.plugin.getHostUrl();
         const token = await songloft.plugin.getToken();
         const wsBase = hostUrl.replace(/^http/, 'ws');
         const wsUrl = `${wsBase}/api/v1/jsplugin/miot/conversation/ws?limit=50&access_token=${token}`;
 
         wsClient = new WebSocket(wsUrl);
+
+        wsClient.onopen = () => {
+            // 连接成功时清理重连定时器
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+        };
+
         wsClient.onmessage = (event: any) => {
             try {
                 const msg = JSON.parse(event.data);
@@ -625,13 +630,13 @@ async function onInit(): Promise<void> {
                                     const keyword = fullText.replace(cmdPrefix, '').trim();
 
                                     if (keyword) {
-                                        // 🌟 1. 输出命中口令日志
+                                        // 🌟 输出命中口令日志
                                         pushDebugLog(`🎯 命中口令词: [${cmdPrefix}], 完整指令: "${fullText}"`);
 
-                                        // 🌟 2. 从内存读配置，并发非阻塞下发打断音频，启动 8 秒倒计时
+                                        // 🌟 并发下发打断音频
                                         playHitSound(msg.data.account_id, msg.data.device_id);
 
-                                        // 🌟 3. 并行开始搜歌推流
+                                        // 🌟 并行开始搜歌推流
                                         handleVoiceCommand(target.type, target.engine, target.node, keyword, msg.data.account_id, msg.data.device_id, target.quality, target.strategy)
                                             .catch(async () => {
                                                 await playFailedSound(msg.data.account_id, msg.data.device_id);
@@ -648,7 +653,39 @@ async function onInit(): Promise<void> {
                 }
             } catch (e) { }
         };
-    } catch (e) { }
+
+        // 🌟 核心保护：断线自动重连
+        wsClient.onclose = () => {
+            pushDebugLog('⚠️ 小爱对话监听通道已断开，将在 5 秒后自动重连...');
+            scheduleReconnect();
+        };
+
+        wsClient.onerror = () => {
+            // 发生错误时会自动触发 onclose，此处只需简单捕获防报错即可
+        };
+
+    } catch (e) {
+        pushDebugLog(`❌ 建立 WebSocket 连接异常: ${e}`);
+        scheduleReconnect(); // 万一获取 token 失败也重试
+    }
+}
+
+// === 初始化 ===
+async function onInit(): Promise<void> {
+    pushDebugLog('🟢 小爱语音助手后端引擎已启动');
+
+    await updateGlobalSettingsCache(); // 预热全局设置到内存
+    await rebuildVoiceRoutes();
+    pushDebugLog('========================================');
+
+    // 🌟 1. 启动获取 ServerHost 的后台守护进程
+    startServerHostDaemon();
+
+    // 🌟 2. 注册插件间同步消息监听
+    setupCommSyncListeners();
+
+    // 🌟 3. 建立对话监听通道 (自带断线重连护甲)
+    connectWebSocket();
 }
 
 async function onDeinit(): Promise<void> {

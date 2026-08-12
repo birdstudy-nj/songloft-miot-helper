@@ -22,7 +22,7 @@ function parsePlayCount(str: string): number {
 }
 
 // 🌟 接收外部传入的 targetPlaylistName
-async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId: string, targetPlaylistName: string, logFn: (msg: string) => void) {
+async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId: string, targetPlaylistName: string, logFn: (msg: string) => void, cancelTimerFn: () => void) {
     if (!lxSongs || lxSongs.length === 0) { logFn('⚠️ LXMusic 导入列表为空'); return; }
 
     try {
@@ -62,6 +62,8 @@ async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId:
         const totalStr = lxSongs.length > 1 ? ` 等 ${lxSongs.length} 首歌` : '';
         logFn(`🚀 正在呼叫小爱音箱即将播放: 《${firstSongName}》${totalStr}`);
 
+        if (typeof cancelTimerFn === 'function') cancelTimerFn();
+
         const playRes = await fetch(`${hostUrl}/api/v1/jsplugin/miot/player/play`, {
             method: 'POST', headers, body: JSON.stringify({ account_id: accountId, device_id: deviceId, playlist_id: newPlaylistId, start_index: 0, play_mode: 'order' })
         });
@@ -72,7 +74,7 @@ async function importLxMusicAndPlay(lxSongs: any[], accountId: string, deviceId:
 }
 
 // 🌟 接收外部传入的 targetPlaylistName，并传给 importLxMusicAndPlay
-export async function handleLxMusicCommand(cmdType: string, platform: string, keyword: string, accountId: string, deviceId: string, strategy: string, targetQuality: string, targetPlaylistName: string, logFn: (msg: string) => void) {
+export async function handleLxMusicCommand(cmdType: string, platform: string, keyword: string, accountId: string, deviceId: string, strategy: string, targetQuality: string, targetPlaylistName: string, logFn: (msg: string) => void, cancelTimerFn: () => void) {
     const hostUrl = await songloft.plugin.getHostUrl();
     const token = await songloft.plugin.getToken();
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -146,6 +148,6 @@ export async function handleLxMusicCommand(cmdType: string, platform: string, ke
 
     if (lxSongsToImport.length > 0) {
         // 🌟 传入目标歌单名
-        await importLxMusicAndPlay(lxSongsToImport, accountId, deviceId, targetPlaylistName, logFn);
+        await importLxMusicAndPlay(lxSongsToImport, accountId, deviceId, targetPlaylistName, logFn, cancelTimerFn);
     }
 }
