@@ -385,56 +385,6 @@
     loadDavServers();
   }
 
-  let debugInterval = null;
-  let debugWs = null;
-  let rawWsLogs = [];
-
-  window.startDebugSession = function() {
-    const wsLogsEl = document.getElementById('ws-logs');
-    const backendLogsEl = document.getElementById('backend-logs');
-
-    if (!debugInterval) {
-      debugInterval = setInterval(async () => {
-        try {
-          const res = await apiGet('/logs');
-          if (res && res.logs && res.logs.length > 0) {
-            const isScrolledToBottom = backendLogsEl.scrollHeight - backendLogsEl.clientHeight <= backendLogsEl.scrollTop + 10;
-            backendLogsEl.textContent = res.logs.join('\n');
-            if (isScrolledToBottom) backendLogsEl.scrollTop = backendLogsEl.scrollHeight;
-          } else backendLogsEl.textContent = "暂无日志...";
-        } catch (e) {}
-      }, 2000);
-    }
-
-    if (!debugWs) {
-      const token = getAuthToken();
-      try {
-        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/jsplugin/miot/conversation/ws?limit=50&access_token=${token}`;
-        debugWs = new WebSocket(wsUrl);
-        debugWs.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'message' && msg.data) {
-              const text = (msg.data.message?.response?.answer || []).map(a => [a.question ? `🗣️: ${a.question}` : '', a.content ? `🤖: ${a.content}` : ''].filter(Boolean).join(' → ')).filter(Boolean).join(' | ');
-              if (text) {
-                rawWsLogs.push(`[${new Date().toLocaleTimeString()}] [${msg.data.device_name || '小爱音箱'}] ${text}`);
-                if (rawWsLogs.length > 50) rawWsLogs.shift();
-                const isScrolledToBottom = wsLogsEl.scrollHeight - wsLogsEl.clientHeight <= wsLogsEl.scrollTop + 10;
-                wsLogsEl.textContent = rawWsLogs.join('\n');
-                if (isScrolledToBottom) wsLogsEl.scrollTop = wsLogsEl.scrollHeight;
-              }
-            }
-          } catch (err) {}
-        };
-      } catch (e) {}
-    }
-  };
-
-  window.stopDebugSession = function() {
-    if (debugInterval) { clearInterval(debugInterval); debugInterval = null; }
-    if (debugWs) { debugWs.close(); debugWs = null; }
-  };
-
   document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('btn-show-add-cmd').addEventListener('click', showCmdModal);
     document.getElementById('btn-cmd-cancel').addEventListener('click', hideCmdModal);

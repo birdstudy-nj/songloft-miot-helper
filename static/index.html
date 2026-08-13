@@ -328,7 +328,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.3</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.5</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -565,6 +565,76 @@
   function getAuthToken() {
     return window.SongloftPlugin?.getAuthToken?.() || '';
   }
+
+  /* ==========================================
+     🔌 诊断面板 WebSocket 日志拦截与后端日志拉取 (全局)
+     ========================================== */
+  let debugInterval = null;
+  let debugWs = null;
+  let rawWsLogs = [];
+
+  window.startDebugSession = function() {
+    const wsLogsEl = document.getElementById('ws-logs');
+    const backendLogsEl = document.getElementById('backend-logs');
+
+    // 1. 定时拉取后端运行日志
+    if (!debugInterval) {
+      debugInterval = setInterval(async () => {
+        try {
+          const res = await window.SongloftPlugin.apiGet('/logs');
+          if (res && res.logs && res.logs.length > 0) {
+            const isScrolledToBottom = backendLogsEl.scrollHeight - backendLogsEl.clientHeight <= backendLogsEl.scrollTop + 10;
+            backendLogsEl.textContent = res.logs.join('\n');
+            if (isScrolledToBottom) backendLogsEl.scrollTop = backendLogsEl.scrollHeight;
+          } else {
+             if (backendLogsEl.textContent === "加载中...") backendLogsEl.textContent = "暂无日志...";
+          }
+        } catch (e) {}
+      }, 2000);
+    }
+
+    // 2. 建立前端 WebSocket 监听小爱对话
+    if (!debugWs) {
+      const token = getAuthToken();
+      if (!token) return;
+      try {
+        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/jsplugin/miot/conversation/ws?limit=50&access_token=${token}`;
+        debugWs = new WebSocket(wsUrl);
+        debugWs.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'message' && msg.data) {
+              let text = '';
+
+              // 🌟 兼容新版 MIoT 扁平化结构
+              if (msg.data.query !== undefined || msg.data.answer !== undefined) {
+                  const q = msg.data.query ? `🗣️: ${msg.data.query}` : '';
+                  const a = msg.data.answer ? `🤖: ${msg.data.answer}` : '';
+                  text = [q, a].filter(Boolean).join(' → ');
+              }
+              // 🌟 兼容老版深层嵌套结构
+              else if (msg.data.message?.response?.answer) {
+                  text = (msg.data.message.response.answer || []).map(a => [a.question ? `🗣️: ${a.question}` : '', a.content ? `🤖: ${a.content}` : ''].filter(Boolean).join(' → ')).filter(Boolean).join(' | ');
+              }
+
+              if (text) {
+                rawWsLogs.push(`[${new Date().toLocaleTimeString()}] [${msg.data.device_name || '小爱音箱'}] ${text}`);
+                if (rawWsLogs.length > 50) rawWsLogs.shift();
+                const isScrolledToBottom = wsLogsEl.scrollHeight - wsLogsEl.clientHeight <= wsLogsEl.scrollTop + 10;
+                wsLogsEl.textContent = rawWsLogs.join('\n');
+                if (isScrolledToBottom) wsLogsEl.scrollTop = wsLogsEl.scrollHeight;
+              }
+            }
+          } catch (err) {}
+        };
+      } catch (e) {}
+    }
+  };
+
+  window.stopDebugSession = function() {
+    if (debugInterval) { clearInterval(debugInterval); debugInterval = null; }
+    if (debugWs) { debugWs.close(); debugWs = null; }
+  };
 
   /* ==========================================
      全局设置自动保存函数
