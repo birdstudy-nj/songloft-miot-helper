@@ -2,7 +2,7 @@
 import { jsonResponse, createRouter, parseQuery } from '@songloft/plugin-sdk';
 import type { HTTPRequest, HTTPResponse } from '@songloft/plugin-sdk';
 import { setupWebDAVRoutes, searchWebDavSongs } from './webdav';
-import { handleLxMusicCommand } from './lxmusic';
+import { searchLxMusicSongs } from './lxmusic';
 
 const router = createRouter();
 let wsClient: any = null;
@@ -73,29 +73,24 @@ async function updateServerHostCache() {
         const res = await fetch(`${hostUrl}/api/v1/jsplugin/miot/config`, {
             headers: {
                 'Authorization': `Bearer ${token}`,
-                'X-Fetch-Timeout-Ms': '3000' // 🌟 加上超时防卡死
+                'X-Fetch-Timeout-Ms': '3000'
             }
         });
         if (res.ok) {
             const data = await res.json();
             if (data?.data?.server_host) {
                 cachedServerHost = data.data.server_host;
-                // 静默更新，不干扰主干日志
             }
         }
-    } catch (e) {
-        // 后台静默刷新，失败默默回退
-    }
+    } catch (e) {}
 }
 
 // 🌟 独立封装的 IP 刷新守护进程
 function startServerHostDaemon() {
-    // 延迟 30 秒再进行首次 IP 拉取，完美避开启动期的宿主锁竞争死锁
     setTimeout(() => {
         updateServerHostCache().catch(() => {});
     }, 30 * 1000);
 
-    // 定时任务每 24 小时自动静默刷新一次 IP
     setInterval(() => {
         updateServerHostCache().catch(() => {});
     }, 24 * 60 * 60 * 1000);
@@ -136,7 +131,7 @@ async function stopMiotPlayer(accountId: string, deviceId: string) {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
-                'X-Fetch-Timeout-Ms': '1500'  // 🌟 1.5秒强制超时，绝不长期锁死VM
+                'X-Fetch-Timeout-Ms': '1500'
             },
             body: JSON.stringify({ account_id: accountId, device_id: deviceId })
         });
@@ -164,7 +159,6 @@ async function playFailedSound(accountId: string, deviceId: string) {
         const soundUrl = `${baseUrl}/api/v1/jsplugin/miot-helper/static/${failedSoundFile}`;
         const targetApiUrl = `${hostUrl}/api/v1/jsplugin/miot/mina/play-url`;
 
-        // 启动 5 秒失败音频超时关停倒计时
         startFailedSoundTimer(accountId, deviceId);
 
         const res = await fetch(targetApiUrl, {
@@ -226,23 +220,18 @@ async function safeStorageSet(key: string, val: string) {
 function playHitSound(accountId: string, deviceId: string) {
     const soundFile = cachedGlobalSettings.hitSound;
 
-    // 拦截“不启用”情况
     if (!soundFile || soundFile === '' || soundFile === 'none' || soundFile === 'disabled') {
         pushDebugLog(`🔕 前置提示音已设置为 [不启用]，跳过打断`);
         return;
     }
 
     pushDebugLog(`🔔 触发前置提示音: ${soundFile}`);
-
-    // 🌟 开启 8 秒防无限循环倒计时
     startHitSoundTimer(accountId, deviceId);
 
     (async () => {
         try {
             const hostUrl = await songloft.plugin.getHostUrl();
             const token = await songloft.plugin.getToken();
-
-            // 优先使用动态获取的公网 server_host，取不到则降级回 hostUrl
             const baseUrl = cachedServerHost || hostUrl;
             const soundUrl = `${baseUrl}/api/v1/jsplugin/miot-helper/static/${soundFile}`;
             const targetApiUrl = `${hostUrl}/api/v1/jsplugin/miot/mina/play-url`;
@@ -354,9 +343,9 @@ async function rebuildVoiceRoutes() {
 }
 
 // ==========================================
-// 🎵 WebDAV 推流逻辑
+// 🎵 统一推流与入库调度指挥中枢 (流水线模式)
 // ==========================================
-async function createPushPlaylistAndPlay(songs: any[], accountId: string, deviceId: string) {
+async function createPushPlaylistAndPlay(songs: any[], accountId: string, deviceId: string, engine: string) {
     if (!songs || songs.length === 0) {
         pushDebugLog('⚠️ 欲推送的歌曲列表为空，放弃建歌单');
         await playFailedSound(accountId, deviceId);
@@ -370,6 +359,9 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
         const token = await songloft.plugin.getToken();
         const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
+        // ====================================
+        // 1. [统一环节] 一步到位删除旧歌单及连带歌曲
+        // ====================================
         let oldPlaylistId: number | null = null;
         try {
             const playlists = (await songloft.playlists.list()) ?? [];
@@ -377,26 +369,61 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
             if (found) oldPlaylistId = found.id;
         } catch (e) {}
 
-        if (oldPlaylistId) await fetch(`${hostUrl}/api/v1/playlists/${oldPlaylistId}`, { method: 'DELETE', headers });
+        if (oldPlaylistId) {
+            pushDebugLog(`🧹 正在清理旧推送歌单 [${targetPlaylistName}](ID: ${oldPlaylistId}) 及其连带歌曲...`);
+            await fetch(`${hostUrl}/api/v1/playlists/${oldPlaylistId}?delete_songs=true`, { method: 'DELETE', headers });
+        }
 
+        // ====================================
+        // 2. [统一环节] 创建全新歌单
+        // ====================================
         pushDebugLog(`➕ 正在创建全新推送歌单 [${targetPlaylistName}]...`);
         const createPlRes = await fetch(`${hostUrl}/api/v1/playlists`, { method: 'POST', headers, body: JSON.stringify({ name: targetPlaylistName, type: 'normal' }) });
         const newPlaylistId = (await createPlRes.json()).id;
-
         const songNames = songs.map(s => s.title || s.name || '未知').slice(0, 3).join(', ') + (songs.length > 3 ? ' 等' : '');
-        pushDebugLog(`🔗 正在向系统注册 ${songs.length} 首远程歌曲 (${songNames})...`);
 
-        const regRes = await fetch(`${hostUrl}/api/v1/songs/remote`, { method: 'POST', headers, body: JSON.stringify(songs) });
-        const songIds = ((await regRes.json()).songs || []).map((s: any) => s.id);
+        // ====================================
+        // 3. [分流环节] 尊重各引擎独特的入库协议
+        // ====================================
+        let isImportSuccess = false;
 
-        if (songIds.length > 0) {
-            await fetch(`${hostUrl}/api/v1/playlists/${newPlaylistId}/songs`, { method: 'POST', headers, body: JSON.stringify({ song_ids: songIds }) });
+        if (engine === 'lxmusic') {
+            pushDebugLog(`🔗 [LXMusic通道] 正在通过专属接口导入 ${songs.length} 首歌曲 (${songNames})...`);
+            const importRes = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/songs/import`, {
+                method: 'POST', headers, body: JSON.stringify({ songs: songs, playlist_id: String(newPlaylistId), new_playlist_name: "" })
+            });
+            if (importRes.ok) {
+                const importData = await importRes.json();
+                pushDebugLog(`✅ 成功导入并绑定 ${importData?.data?.success || 0} 首歌进歌单！`);
+                isImportSuccess = true;
+            } else {
+                throw new Error(`LXMusic 歌曲导入失败 (HTTP ${importRes.status})`);
+            }
 
+        } else if (engine === 'webdav') {
+            pushDebugLog(`🔗 [WebDAV通道] 正在向系统注册 ${songs.length} 首远程歌曲 (${songNames})...`);
+            const regRes = await fetch(`${hostUrl}/api/v1/songs/remote`, { method: 'POST', headers, body: JSON.stringify(songs) });
+            const songIds = ((await regRes.json()).songs || []).map((s: any) => s.id);
+
+            if (songIds.length > 0) {
+                await fetch(`${hostUrl}/api/v1/playlists/${newPlaylistId}/songs`, { method: 'POST', headers, body: JSON.stringify({ song_ids: songIds }) });
+                isImportSuccess = true;
+            }
+
+        } else {
+            // 🌟 相当于 Python 的 pass，暂时空着不执行入库操作
+            // 留给今后自己创建引擎（如 MusicFree）时填充逻辑
+            pushDebugLog(`⚠️ 尚未实现引擎 [${engine}] 的入库逻辑，已跳过`);
+        }
+
+        // ====================================
+        // 4. [统一环节] 下发小爱设备播放
+        // ====================================
+        if (isImportSuccess) {
             const firstSongName = songs[0]?.title || songs[0]?.name || '未知歌曲';
             const totalStr = songs.length > 1 ? ` 等 ${songs.length} 首歌` : '';
             pushDebugLog(`🚀 正在呼叫小爱音箱即将播放: 《${firstSongName}》${totalStr}`);
 
-            // 🌟 即将播放正式歌曲，销毁所有前置/失败定时器
             cancelAllTimers(accountId, deviceId);
 
             const playRes = await fetch(`${hostUrl}/api/v1/jsplugin/miot/player/play`, {
@@ -419,9 +446,7 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
 // 🎯 语音口令处理总入口
 async function handleVoiceCommand(cmdType: string, engine: string, nodeName: string, rawKeyword: string, accountId: string, deviceId: string, quality?: string, strategy?: string) {
 
-    // 🌟 提取全局设定的歌单名称
-    const targetPlaylistName = getTargetPlaylistName();
-
+    // === LXMusic 处理分支 ===
     if (engine === 'lxmusic') {
         let actualPlatform = nodeName;
         let actualQuality = quality || '320k';
@@ -450,11 +475,17 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         }
 
         try {
-            // 🌟 将 targetPlaylistName 作为参数传入
-            await handleLxMusicCommand(
-                cmdType, actualPlatform, rawKeyword, accountId, deviceId, actualStrategy, actualQuality, targetPlaylistName, pushDebugLog,
-                () => cancelAllTimers(accountId, deviceId)
-            );
+            // 调用搜歌函数并拿到歌曲列表
+            const songs = await searchLxMusicSongs(cmdType, actualPlatform, rawKeyword, actualStrategy, actualQuality, pushDebugLog);
+
+            if (songs === null) {
+                await playFailedSound(accountId, deviceId);
+            } else if (songs.length === 0) {
+                await playFailedSound(accountId, deviceId);
+            } else {
+                // 走统一流水线，传入 'lxmusic'
+                await createPushPlaylistAndPlay(songs, accountId, deviceId, 'lxmusic');
+            }
         } catch (e) {
             pushDebugLog(`⚠️ LXMusic 执行异常: ${e}`);
             await playFailedSound(accountId, deviceId);
@@ -462,6 +493,7 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         return;
     }
 
+    // === WebDAV 处理分支 ===
     if (cmdType === 'search') {
         pushDebugLog(`🔍 开始在 WebDAV 节点 [${nodeName}] 中匹配歌曲: "${rawKeyword}"`);
         let songs = await searchWebDavSongs(nodeName, rawKeyword, pushDebugLog);
@@ -491,10 +523,11 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         }
 
         if (songs && songs.length > 0) {
-            await createPushPlaylistAndPlay(songs, accountId, deviceId);
+            // 走统一流水线，传入 'webdav'
+            await createPushPlaylistAndPlay(songs, accountId, deviceId, 'webdav');
         } else {
             pushDebugLog(`💀 彻底未搜到关于此关键字的音乐，放弃操作`);
-            await playFailedSound(accountId, deviceId); // 🌟 搜歌彻底失败，触发失败音
+            await playFailedSound(accountId, deviceId);
         }
 
     } else if (cmdType === 'play') {
@@ -573,10 +606,11 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
                 pushDebugLog(`⚠️ 该歌单曲目数超过 500 首，已自动截取前 500 首`);
                 matchedSongs = matchedSongs.slice(0, 500);
             }
-            await createPushPlaylistAndPlay(matchedSongs, accountId, deviceId);
+            // 走统一流水线，传入 'webdav'
+            await createPushPlaylistAndPlay(matchedSongs, accountId, deviceId, 'webdav');
         } else {
             pushDebugLog(`💀 彻底未找到匹配的歌单，放弃操作`);
-            await playFailedSound(accountId, deviceId); // 🌟 匹配歌单失败，触发失败音
+            await playFailedSound(accountId, deviceId);
         }
     }
 }
@@ -591,7 +625,7 @@ function scheduleReconnect() {
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         connectWebSocket();
-    }, 5000); // 5秒后重连，防止网络抖动导致的无限密集重连死循环
+    }, 5000);
 }
 
 async function connectWebSocket() {
@@ -609,7 +643,6 @@ async function connectWebSocket() {
         wsClient = new WebSocket(wsUrl);
 
         wsClient.onopen = () => {
-            // 连接成功时清理重连定时器
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
@@ -630,13 +663,9 @@ async function connectWebSocket() {
                                     const keyword = fullText.replace(cmdPrefix, '').trim();
 
                                     if (keyword) {
-                                        // 🌟 输出命中口令日志
                                         pushDebugLog(`🎯 命中口令词: [${cmdPrefix}], 完整指令: "${fullText}"`);
-
-                                        // 🌟 并发下发打断音频
                                         playHitSound(msg.data.account_id, msg.data.device_id);
 
-                                        // 🌟 并行开始搜歌推流
                                         handleVoiceCommand(target.type, target.engine, target.node, keyword, msg.data.account_id, msg.data.device_id, target.quality, target.strategy)
                                             .catch(async () => {
                                                 await playFailedSound(msg.data.account_id, msg.data.device_id);
@@ -654,19 +683,17 @@ async function connectWebSocket() {
             } catch (e) { }
         };
 
-        // 🌟 核心保护：断线自动重连
         wsClient.onclose = () => {
             pushDebugLog('⚠️ 小爱对话监听通道已断开，将在 5 秒后自动重连...');
             scheduleReconnect();
         };
 
         wsClient.onerror = () => {
-            // 发生错误时会自动触发 onclose，此处只需简单捕获防报错即可
         };
 
     } catch (e) {
         pushDebugLog(`❌ 建立 WebSocket 连接异常: ${e}`);
-        scheduleReconnect(); // 万一获取 token 失败也重试
+        scheduleReconnect();
     }
 }
 
@@ -674,17 +701,12 @@ async function connectWebSocket() {
 async function onInit(): Promise<void> {
     pushDebugLog('🟢 小爱语音助手后端引擎已启动');
 
-    await updateGlobalSettingsCache(); // 预热全局设置到内存
+    await updateGlobalSettingsCache();
     await rebuildVoiceRoutes();
     pushDebugLog('========================================');
 
-    // 🌟 1. 启动获取 ServerHost 的后台守护进程
     startServerHostDaemon();
-
-    // 🌟 2. 注册插件间同步消息监听
     setupCommSyncListeners();
-
-    // 🌟 3. 建立对话监听通道 (自带断线重连护甲)
     connectWebSocket();
 }
 
@@ -715,7 +737,7 @@ router.post('/store', async (req) => {
         await safeStorageSet(key, value);
 
         if (key === 'xiaoai_global_settings') {
-            await updateGlobalSettingsCache(); // 🌟 前端更改设置时立刻刷新内存
+            await updateGlobalSettingsCache();
         }
 
         if (key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs') rebuildVoiceRoutes();
