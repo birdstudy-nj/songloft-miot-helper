@@ -6,6 +6,12 @@
   <title>小爱语音助手</title>
   <link rel="icon" type="image/svg+xml" href="static/icon.svg">
   <style>
+    body {
+        max-width: 800px;
+        margin: -18px auto;
+        padding: 0 16px;
+    }
+
     /* ==========================================
        基础组件与表单 (彻底使用 mh- 前缀隔离)
        ========================================== */
@@ -32,7 +38,17 @@
       transition: border-color 0.2s; height: 36px; margin: 0;
     }
     .mh-select:focus, .mh-input:focus { border-color: var(--md-primary); border-width: 2px; padding: 7px 11px; }
-
+    /* 专门为 select 增加自定义跨平台箭头，解决暗黑模式不可见问题 */
+    .mh-select {
+      appearance: none;
+      -webkit-appearance: none; /* 干掉苹果的默认黑箭头 */
+      /* 画一个在暗/亮模式下都清晰的中性灰小箭头 */
+      background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      background-size: 16px;
+      padding-right: 32px; /* 给右侧箭头留出点击空间 */
+    }
     .mh-field { margin-bottom: 12px; }
     .mh-field label { display: block; margin-bottom: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500; }
 
@@ -48,7 +64,9 @@
     .chip, .mh-tag {
       display: inline-flex; align-items: center; gap: 6px;
       height: 28px; padding: 0 12px;
-      background: #D6E3FF; color: var(--md-on-surface);
+      /* 🌟 删掉原来的 #D6E3FF，换成下面的全动态变量 */
+      background: var(--md-primary-container);
+      color: var(--md-on-primary-container);
       border-radius: 6px;
       font-size: 13px; font-weight: 500; border: 1px solid var(--md-outline-variant);
       cursor: default; white-space: nowrap; box-sizing: border-box; flex-shrink: 0;
@@ -83,6 +101,32 @@
     #lx-sources-list input[type="checkbox"]:checked::after {
       transform: translateX(20px);
     }
+
+    /* ==========================================
+       🌙 仅暗黑模式生效：LXMusic 源列表颜色同步口令胶囊
+       ========================================== */
+    @media (prefers-color-scheme: dark) {
+      /* 1. 外层大方框：使用深蓝色，并锁死圆角防止内部溢出 */
+      #lx-sources-list {
+        background: var(--md-primary-container) !important;
+        color: var(--md-on-primary-container) !important;
+        overflow: hidden !important;
+      }
+
+      /* 2. 内部生成的源卡片：背景透明，文字颜色对齐，彻底融入深蓝背景 */
+      #lx-sources-list > div,
+      #lx-sources-list [style*="background"] {
+        background: transparent !important;
+        color: var(--md-on-primary-container) !important;
+      }
+
+      /* 3. 🌟 修复：把删除按钮从透明规则里“救”出来，恢复危险色底色 */
+      #lx-sources-list .mh-source-del-btn {
+        background: var(--md-error-container, #ffdad6) !important;
+        color: var(--md-error, #ba1a1a) !important;
+      }
+    }
+
     /* 强制删除按钮样式 */
     .mh-source-del-btn {
       appearance: none; -webkit-appearance: none;
@@ -168,12 +212,24 @@
        标签栏与悬浮箭头
        ========================================== */
     .tabs-container-wrap {
-      position: relative; margin-bottom: 20px;
+      position: sticky;
+      /* 🌟 核心：避开上方 56px 高度的蓝条 app-bar */
+      top: 56px;
+      /* 🌟 层级设为 90，保证压住下方内容，但不遮挡上方层级为 100 的蓝条 */
+      z-index: 90;
+      background: var(--md-surface, #ffffff);
+      margin-bottom: 20px;
       border-bottom: 1px solid var(--md-outline-variant);
+      padding-top: 10px;
+    }
+
+    /* 🌟 补充补丁：如果是在嵌入模式下（宿主会自动隐藏 app-bar 蓝条），则正常在 0px 吸顶 */
+    html.embed .tabs-container-wrap {
+      top: 0;
     }
     .mh-tabs {
       display: flex; gap: 4px; overflow-x: auto; white-space: nowrap;
-      scrollbar-width: none; margin-bottom: -1px; scroll-behavior: smooth; padding: 0 40px;
+      scrollbar-width: none; margin-bottom: -1px; scroll-behavior: smooth; padding: 0 40px 0 20px;
     }
     .mh-tabs::-webkit-scrollbar { display: none; }
 
@@ -272,7 +328,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.1</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.3</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -511,7 +567,7 @@
   }
 
   /* ==========================================
-     全局设置保存逻辑
+     全局设置自动保存函数
      ========================================== */
   async function saveGlobalSettings() {
     const targetPlaylist = document.getElementById('global-target-playlist')?.value || 'iWebPlayer推送';
@@ -523,91 +579,25 @@
         key: 'xiaoai_global_settings',
         value: JSON.stringify(payload)
       });
+      console.log("✅ 全局设置已自动保存:", payload);
     } catch (e) {
-      console.warn("保存全局设置失败", e);
+      console.warn("❌ 保存全局设置失败", e);
     }
   }
 
   /* ==========================================
-     标签页与事件切换
-     ========================================== */
-  document.querySelectorAll('.mh-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.mh-tab, .mh-pane').forEach(el => el.classList.remove('active'));
-      tab.classList.add('active');
-
-      const targetId = tab.dataset.target;
-      document.getElementById(targetId)?.classList.add('active');
-
-      if (targetId === 'tab-debug') {
-        if (typeof window.startDebugSession === 'function') window.startDebugSession();
-      } else {
-        if (typeof window.stopDebugSession === 'function') window.stopDebugSession();
-      }
-    });
-  });
-
-  /* ==========================================
-     设置面板数据初始化 (仅触发一次)
-     ========================================== */
-  document.querySelector('[data-target="tab-settings"]')?.addEventListener('click', async () => {
-    try {
-      // 1. 获取已保存的设置 (恢复旧值用)
-      let savedSettings = {};
-      try {
-        const storeRes = await window.SongloftPlugin.apiGet('/store?key=xiaoai_global_settings');
-        if (storeRes && storeRes.data) {
-          savedSettings = typeof storeRes.data === 'string' ? JSON.parse(storeRes.data) : storeRes.data;
-        }
-      } catch (e) {}
-
-      // 2. 拉取系统内的所有歌单
-      const res = await fetch('/api/v1/playlists?limit=500', {
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` }
-      });
-      const data = await res.json();
-      const list = (data.playlists || []).filter(p => p.labels === null);
-
-      const select = document.getElementById('global-target-playlist');
-      const soundSelect = document.getElementById('global-hit-sound');
-
-      // 3. 渲染歌单下拉框并绑定事件
-      if (select) {
-        select.innerHTML = '<option value="iWebPlayer推送">iWebPlayer推送 (默认)</option>';
-        list.forEach(p => {
-          if (p.name !== 'iWebPlayer推送') select.options.add(new Option(p.name, p.name));
-        });
-
-        // 🌟 恢复上次选择的歌单
-        if (savedSettings.targetPlaylist) {
-          select.value = savedSettings.targetPlaylist;
-        }
-
-        // 🌟 绑定切换事件：改动即保存
-        select.addEventListener('change', saveGlobalSettings);
-      }
-
-      // 4. 渲染提示音下拉框并绑定事件
-      if (soundSelect) {
-        // 🌟 恢复上次选择的提示音
-        if (savedSettings.hitSound !== undefined) {
-          soundSelect.value = savedSettings.hitSound;
-        }
-
-        // 🌟 绑定切换事件：改动即保存
-        soundSelect.addEventListener('change', saveGlobalSettings);
-      }
-
-    } catch (e) {
-      console.warn("加载设置面板数据发生异常", e);
-    }
-  }, { once: true });
-
-  /* ==========================================
-     标签栏横向滚动与悬浮箭头控制
+     【第一套逻辑】：页面加载时无条件绑定下拉框变动事件
+     彻底与数据拉取解耦，哪怕接口全断，改变下拉框也必触发保存
      ========================================== */
   document.addEventListener('DOMContentLoaded', () => {
 
+    // 1. 命中歌曲推送至歌单 -> 绑定 change 事件
+    document.getElementById('global-target-playlist')?.addEventListener('change', saveGlobalSettings);
+
+    // 2. 前置语音提示音 -> 绑定 change 事件
+    document.getElementById('global-hit-sound')?.addEventListener('change', saveGlobalSettings);
+
+    // 3. 标签栏横向滚动与悬浮箭头控制
     const tabsEl = document.getElementById('mh-tabs-scroll');
     const arrowRightEl = document.getElementById('tab-scroll-right');
     const arrowLeftEl = document.getElementById('tab-scroll-left');
@@ -634,17 +624,104 @@
       window.addEventListener('resize', checkScroll);
       setTimeout(checkScroll, 100);
 
-      arrowRightEl.addEventListener('click', () => tabsEl.scrollBy({ left: 150, behavior: 'smooth' }));
-      arrowLeftEl.addEventListener('click', () => tabsEl.scrollBy({ left: -150, behavior: 'smooth' }));
+      arrowRightEl.addEventListener('click', () => {
+        tabsEl.scrollTo({ left: tabsEl.scrollLeft + 150, behavior: 'smooth' });
+      });
+
+      arrowLeftEl.addEventListener('click', () => {
+        const targetLeft = Math.max(0, tabsEl.scrollLeft - 150);
+        tabsEl.scrollTo({ left: targetLeft, behavior: 'smooth' });
+      });
     }
 
-    // 启动 Debug 会话
+    // 4. 启动 Debug 会话 (如果默认在诊断页)
     setTimeout(() => {
       const activeTab = document.querySelector('.mh-tab.active');
       if (activeTab && activeTab.dataset.target === 'tab-debug') {
         if (typeof window.startDebugSession === 'function') window.startDebugSession();
       }
     }, 500);
+
+    // 5. 挂载日志设备监听
+    const logEl = document.getElementById('backend-logs');
+    if (logEl) {
+      logObserver.observe(logEl, { childList: true, characterData: true, subtree: true });
+    }
+    setTimeout(fetchAndLogDeviceNames, 1000);
+  });
+
+  /* ==========================================
+     标签页点击切换事件
+     ========================================== */
+  document.querySelectorAll('.mh-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.mh-tab, .mh-pane').forEach(el => el.classList.remove('active'));
+      tab.classList.add('active');
+
+      const targetId = tab.dataset.target;
+      document.getElementById(targetId)?.classList.add('active');
+
+      if (targetId === 'tab-debug') {
+        if (typeof window.startDebugSession === 'function') window.startDebugSession();
+      } else {
+        if (typeof window.stopDebugSession === 'function') window.stopDebugSession();
+      }
+    });
+  });
+
+  /* ==========================================
+     【第二套逻辑】：点击设置标签仅执行“数据拉取与填充”
+     每次点击都触发，绝不包含任何 addEventListener 的事件挂载
+     ========================================== */
+  document.querySelector('[data-target="tab-settings"]')?.addEventListener('click', async () => {
+    try {
+      const select = document.getElementById('global-target-playlist');
+      const soundSelect = document.getElementById('global-hit-sound');
+
+      // 1. 拉取已保存的全局配置
+      let savedSettings = {};
+      try {
+        const storeRes = await window.SongloftPlugin.apiGet('/store?key=xiaoai_global_settings');
+        if (storeRes && storeRes.data) {
+          savedSettings = typeof storeRes.data === 'string' ? JSON.parse(storeRes.data) : storeRes.data;
+        }
+      } catch (e) {}
+
+      // 恢复提示音下拉框的选中项
+      if (soundSelect && savedSettings.hitSound !== undefined) {
+        soundSelect.value = savedSettings.hitSound;
+      }
+
+      // 2. 拉取系统歌单数据并增补歌单下拉框
+      try {
+        const res = await fetch('/api/v1/playlists?limit=500', {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const list = (data.playlists || []).filter(p => p.labels === null);
+
+          if (select) {
+            select.innerHTML = '<option value="iWebPlayer推送">iWebPlayer推送 (默认)</option>';
+            list.forEach(p => {
+              if (p.name !== 'iWebPlayer推送') {
+                select.options.add(new Option(p.name, p.name));
+              }
+            });
+            // 恢复歌单下拉框的选中项
+            if (savedSettings.targetPlaylist) {
+              select.value = savedSettings.targetPlaylist;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ 拉取系统歌单列表失败", e);
+      }
+
+    } catch (e) {
+      console.warn("⚠️ 加载设置数据发生异常", e);
+    }
   });
 
   /* ==========================================
@@ -652,7 +729,6 @@
      ========================================== */
   let cachedDeviceStr = '';
 
-  // 1. 抓取设备列表数据
   async function fetchAndLogDeviceNames() {
     try {
       const token = getAuthToken();
@@ -678,8 +754,6 @@
             }
           }
           cachedDeviceStr = deviceNames.length > 0 ? deviceNames.join(', ') : '暂无托管的小爱设备';
-
-          // 获取成功后，立刻尝试贴入日志框
           applyDeviceLogToPre();
         }
       }
@@ -688,50 +762,37 @@
     }
   }
 
-  // 2. 提取第一条日志的时间，并将设备信息插入为日志第一行
   function applyDeviceLogToPre() {
     if (!cachedDeviceStr) return;
     const logEl = document.getElementById('backend-logs');
     if (!logEl) return;
 
     const rawText = logEl.innerText || '';
-    // 如果已经贴过了，就不重复贴
     if (rawText.includes('🔊 当前受控设备:')) return;
 
-    // 匹配日志中第一条形如 [17:00:25] 的时间戳
     const match = rawText.match(/\[(\d{2}:\d{2}:\d{2})\]/);
-    if (!match) return; // 后端日志还没加载出来时先不贴
+    if (!match) return;
 
-    const timeStr = match[1]; // 复制第一条记录的时间
+    // 🌟 1. 在顶部插入设备行之前，先记录用户当前是否处于最底部 (留 30px 容差)
+    const isScrolledToBottom = logEl.scrollHeight - logEl.clientHeight <= logEl.scrollTop + 30;
+
+    const timeStr = match[1];
     const deviceLine = `[${timeStr}] 🔊 当前受控设备: [${cachedDeviceStr}]`;
-
-    // 拼接在最前面
     logEl.innerText = deviceLine + '\n' + rawText;
+
+    // 🌟 2. 顶部插入新行后总高度变大了，如果刚才就在底部，重新修正滚动条到最新的最底部！
+    if (isScrolledToBottom) {
+      logEl.scrollTop = logEl.scrollHeight;
+    }
   }
-
-  // 3. 监听 #backend-logs 内容变化 (每2秒轮询刷新时，自动补上设备日志)
   const logObserver = new MutationObserver(() => {
-    // 暂时断开监听，防止修改 innerText 时触发死循环
     logObserver.disconnect();
-
     applyDeviceLogToPre();
-
-    // 重新挂载监听
     const logEl = document.getElementById('backend-logs');
     if (logEl) {
       logObserver.observe(logEl, { childList: true, characterData: true, subtree: true });
     }
   });
-
-  // 页面加载绑定
-  document.addEventListener('DOMContentLoaded', () => {
-    const logEl = document.getElementById('backend-logs');
-    if (logEl) {
-      logObserver.observe(logEl, { childList: true, characterData: true, subtree: true });
-    }
-    setTimeout(fetchAndLogDeviceNames, 1000);
-  });
-
   </script>
 </body>
 </html>
