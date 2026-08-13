@@ -653,29 +653,35 @@ async function connectWebSocket() {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'message' && msg.data) {
-                    const answers = msg.data.message?.response?.answer || [];
-                    for (const a of answers) {
-                        if (a.question) {
-                            const fullText = a.question.trim();
-                            for (const cmdPrefix in voiceRoutes) {
-                                if (fullText.startsWith(cmdPrefix)) {
-                                    const target = voiceRoutes[cmdPrefix];
-                                    const keyword = fullText.replace(cmdPrefix, '').trim();
+                    // 🌟 兼容新版 MIoT 插件扁平化结构 (直接读取 query 字段)
+                    let fullText = msg.data.query;
 
-                                    if (keyword) {
-                                        pushDebugLog(`🎯 命中口令词: [${cmdPrefix}], 完整指令: "${fullText}"`);
-                                        playHitSound(msg.data.account_id, msg.data.device_id);
+                    // 🌟 兼容旧版深层嵌套结构 (防错兜底)
+                    if (!fullText && msg.data.message?.response?.answer) {
+                        const answers = msg.data.message.response.answer;
+                        if (answers.length > 0) fullText = answers[0].question;
+                    }
 
-                                        handleVoiceCommand(target.type, target.engine, target.node, keyword, msg.data.account_id, msg.data.device_id, target.quality, target.strategy)
-                                            .catch(async () => {
-                                                await playFailedSound(msg.data.account_id, msg.data.device_id);
-                                            })
-                                            .finally(() => {
-                                                pushDebugLog('========================================');
-                                            });
-                                    }
-                                    break;
+                    if (fullText && typeof fullText === 'string') {
+                        const trimmedText = fullText.trim();
+                        for (const cmdPrefix in voiceRoutes) {
+                            if (trimmedText.startsWith(cmdPrefix)) {
+                                const target = voiceRoutes[cmdPrefix];
+                                const keyword = trimmedText.replace(cmdPrefix, '').trim();
+
+                                if (keyword) {
+                                    pushDebugLog(`🎯 命中口令词: [${cmdPrefix}], 完整指令: "${trimmedText}"`);
+                                    playHitSound(msg.data.account_id, msg.data.device_id);
+
+                                    handleVoiceCommand(target.type, target.engine, target.node, keyword, msg.data.account_id, msg.data.device_id, target.quality, target.strategy)
+                                        .catch(async () => {
+                                            await playFailedSound(msg.data.account_id, msg.data.device_id);
+                                        })
+                                        .finally(() => {
+                                            pushDebugLog('========================================');
+                                        });
                                 }
+                                break; // 命中一次后跳出循环
                             }
                         }
                     }
