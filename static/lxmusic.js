@@ -224,7 +224,14 @@
               <input type="checkbox" class="lx-toggle-source" data-id="${src.id}" ${src.enabled ? 'checked' : ''}>
               <span class="lx-slider"></span>
             </label>
-            <button class="mh-source-del-btn" data-id="${src.id}" style="height: 24px; padding: 0 8px; font-size: 12px; border:none; background:transparent;">🗑️</button>
+            <button class="mh-source-del-btn btn-delete-lx-source" data-id="${src.id}" title="删除此源">
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </button>
           </div>
         </div>
         `;
@@ -255,7 +262,9 @@
 
       const fileInput = document.getElementById('lx-file-input');
       const importBtn = document.getElementById('btn-lx-import');
+      const importUrlBtn = document.getElementById('btn-lx-import-url'); // 🌟 新增的 URL 导入按钮
 
+      // 1. 本地文件上传
       if (importBtn && fileInput) {
           importBtn.addEventListener('click', () => fileInput.click());
 
@@ -271,7 +280,45 @@
                   const res = await fetch('/api/v1/jsplugin/lxmusic/api/sources/import', { method: 'POST', headers: getHeaders(), body: formData });
                   if (res.ok) { alert("✅ 脚本导入成功！"); loadLxSources(); } else alert("❌ 导入失败，请检查格式");
               } catch(err) { alert("❌ 上传发生异常"); }
-              finally { importBtn.innerText = "➕ 导入.js源"; importBtn.style.pointerEvents = "auto"; fileInput.value = ""; }
+              finally { importBtn.innerText = "➕ 上传.js源脚本"; importBtn.style.pointerEvents = "auto"; fileInput.value = ""; }
+          });
+      }
+
+      // 2. 从 URL 网址导入源脚本 (直传后端新接口)
+      if (importUrlBtn) {
+          importUrlBtn.addEventListener('click', async () => {
+              const inputUrl = prompt("请输入 .js 源脚本的完整 URL 地址：");
+              if (!inputUrl || !inputUrl.trim()) return;
+
+              const targetUrl = inputUrl.trim();
+              importUrlBtn.innerText = "⏳ 正在导入..."; importUrlBtn.style.pointerEvents = "none";
+
+              try {
+                  // 直接调用你提供的后端专用 import-url 接口
+                  const res = await fetch('/api/v1/jsplugin/lxmusic/api/sources/import-url', {
+                      method: 'POST',
+                      headers: getJsonHeaders(),
+                      body: JSON.stringify({ url: targetUrl })
+                  });
+
+                  if (res && res.ok) {
+                      const data = await res.json();
+                      if (data.code === 0) {
+                          alert(`✅ URL 脚本 [${data.data?.name || '未知'}] 导入成功！`);
+                          loadLxSources(); // 刷新列表
+                      } else {
+                          alert(`❌ 导入失败: ${data.msg || '未知错误'}`);
+                      }
+                  } else {
+                      alert("❌ 导入失败，请检查 URL 地址是否有效或查看后端日志");
+                  }
+              } catch(err) {
+                  alert("❌ 导入过程发生网络异常: " + err.message);
+              } finally {
+                  // 恢复按钮状态
+                  importUrlBtn.innerText = "➕ 从URL导入源";
+                  importUrlBtn.style.pointerEvents = "auto";
+              }
           });
       }
       loadLxSources();
