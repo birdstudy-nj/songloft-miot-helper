@@ -194,6 +194,16 @@
   async function loadDavServers() {
     try {
       const res = await fetch('/api/v1/jsplugin/dav/lists', { headers: getHeaders() });
+
+      // 🌟 拦截 WebDAV 页的 403 报错
+      if (res.status === 403) {
+          const json = await res.json().catch(() => ({}));
+          if (json.detail === 'plugin_disabled') {
+              if (window.showPluginDisabledMask) window.showPluginDisabledMask('tab-webdav', json.error);
+              return;
+          }
+      }
+
       if (!res.ok) throw new Error("未启用 dav 插件");
       currentDavServers = await res.json() || [];
 

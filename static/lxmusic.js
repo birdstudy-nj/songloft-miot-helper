@@ -200,6 +200,16 @@
 
     try {
       const res = await fetch('/api/v1/jsplugin/lxmusic/api/sources', { headers: getJsonHeaders() });
+
+      // 🌟 拦截 LXMusic 页的 403 报错
+      if (res.status === 403) {
+          const json = await res.json().catch(() => ({}));
+          if (json.detail === 'plugin_disabled') {
+              if (window.showPluginDisabledMask) window.showPluginDisabledMask('tab-lxmusic', json.error);
+              return;
+          }
+      }
+
       if (!res.ok) { listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--md-error); font-size: 13px;">⚠️ 无法连接到 LXMusic 插件。</div>'; return; }
 
       const responseJson = await res.json();

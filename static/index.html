@@ -79,8 +79,8 @@
     .mh-tag-close { cursor: pointer; color: var(--md-error); font-weight: bold; line-height: 1; margin-left: 2px; }
     .mh-tag-close:hover { opacity: 0.7; transform: scale(1.1); }
 
-    /* 🌟 LXMusic 底部源列表专属补丁：即使 JS 还没改完类名，也能用 CSS 强行美化 */
-    #lx-sources-list input[type="checkbox"] {
+    /* 🌟 全局通用的滑动开关样式 (兼容 LXMusic 源列表和独立开关) */
+    #lx-sources-list input[type="checkbox"], .mh-switch-input {
       appearance: none; -webkit-appearance: none;
       position: relative; width: 40px; height: 20px;
       background-color: var(--md-outline-variant);
@@ -89,16 +89,16 @@
       box-shadow: inset 0 0 3px rgba(0,0,0,0.1);
       margin: 0; vertical-align: middle; flex-shrink: 0;
     }
-    #lx-sources-list input[type="checkbox"]::after {
+    #lx-sources-list input[type="checkbox"]::after, .mh-switch-input::after {
       content: ""; position: absolute; width: 16px; height: 16px;
       background-color: white; border-radius: 50%;
       top: 2px; left: 2px; transition: transform 0.3s;
       box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
-    #lx-sources-list input[type="checkbox"]:checked {
+    #lx-sources-list input[type="checkbox"]:checked, .mh-switch-input:checked {
       background-color: var(--md-primary);
     }
-    #lx-sources-list input[type="checkbox"]:checked::after {
+    #lx-sources-list input[type="checkbox"]:checked::after, .mh-switch-input:checked::after {
       transform: translateX(20px);
     }
 
@@ -177,6 +177,7 @@
        ========================================== */
     .mh-pane {
       display: none;
+      position: relative;
       background: var(--md-surface-container-lowest, #ffffff);
       border: 1px solid var(--md-outline-variant);
       border-radius: var(--md-radius-lg, 16px);
@@ -185,6 +186,30 @@
       animation: fadeIn 0.3s ease;
     }
     .mh-pane.active { display: block; }
+    /* ==========================================
+       🌟 插件禁用毛玻璃遮罩 (动态渲染)
+       ========================================== */
+    .plugin-disabled-mask {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      /* 👇 在这里修改透明度：0.2 越小越透明；blur(4px) 越小越清晰 */
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      z-index: 50; display: flex; flex-direction: column;
+      justify-content: center; align-items: center; text-align: center;
+      padding: 20px; box-sizing: border-box;
+    }
+    @media (prefers-color-scheme: dark) {
+      /* 👇 暗黑模式下的透明度 (0.3 越小越透明) */
+      .plugin-disabled-mask { background: rgba(0, 0, 0, 0.3); }
+    }
+    .plugin-disabled-card {
+      background: var(--md-surface, #ffffff);
+      padding: 32px; border-radius: var(--md-radius-lg, 16px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+      max-width: 400px; width: 100%;
+      border: 1px solid var(--md-outline-variant);
+      animation: fadeIn 0.3s ease;
+    }
 
     /* 区块附带微弱底阴影 */
     .card {
@@ -328,7 +353,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.6</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.7</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -543,15 +568,18 @@
 
     <div id="tab-debug" class="mh-pane active">
       <div class="card">
-        <div class="card-title">📡 小爱语音指令拦截 (WebSocket)</div>
+        <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <span>📡 小爱语音对话监听</span>
+          <input type="checkbox" id="toggle-conversation-monitor" class="mh-switch-input" title="开启/关闭对话监听">
+        </div>
         <p class="desc">实时截获并显示小爱音箱的原始语音对话指令。</p>
-        <pre id="ws-logs" style="height: 180px; color: #61dafb; background: #25232A; padding: 12px; border-radius: 8px; overflow-y: auto; font-size: 13px; margin: 0; white-space: pre-wrap;">等待语音输入...</pre>
+        <pre id="ws-logs" style="height: 120px; color: #61dafb; background: #25232A; padding: 12px; border-radius: 8px; overflow-y: auto; font-size: 13px; margin: 0; white-space: pre-wrap;">等待语音输入...</pre>
       </div>
 
       <div class="card">
         <div class="card-title">🚀 后端执行引擎日志</div>
         <p class="desc">实时显示搜歌、删单、建单、推送等底层执行步骤。</p>
-        <pre id="backend-logs" style="height: 350px; color: #a6e22e; background: #25232A; padding: 12px; border-radius: 8px; overflow-y: auto; font-size: 13px; margin: 0; white-space: pre-wrap;">加载中...</pre>
+        <pre id="backend-logs" style="height: 450px; color: #a6e22e; background: #25232A; padding: 12px; border-radius: 8px; overflow-y: auto; font-size: 13px; margin: 0; white-space: pre-wrap;">加载中...</pre>
       </div>
     </div>
   </main>
@@ -719,6 +747,137 @@
       logObserver.observe(logEl, { childList: true, characterData: true, subtree: true });
     }
     setTimeout(fetchAndLogDeviceNames, 1000);
+
+    // ==========================================
+    // 🌟 6. 页面加载完成后的常驻运行检测 (防休眠)
+    // ==========================================
+    setTimeout(async () => {
+      try {
+        const token = getAuthToken();
+        if (!token) return;
+
+        const keepAliveRes = await fetch('/api/v1/settings/plugin-keep-alive', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (keepAliveRes.ok) {
+          const data = await keepAliveRes.json();
+          const currentPlugins = data.plugins || [];
+
+          // 定义需要保障的四大金刚插件
+          const requiredMap = {
+            'lxmusic': '洛雪音源 (lxmusic)',
+            'dav': 'WebDAV (dav)',
+            'miot': '智能音箱 (miot)',
+            'miot-helper': '小爱语音助手 (miot-helper)'
+          };
+
+          const missingKeys = Object.keys(requiredMap).filter(k => !currentPlugins.includes(k));
+
+          if (missingKeys.length > 0) {
+            const missingNames = missingKeys.map(k => requiredMap[k]).join('\n • ');
+            const confirmMsg = `⚠️ 性能优化建议\n\n检测到以下插件未开启“常驻运行”：\n • ${missingNames}\n\n如果不开启常驻，长时间不使用后首次喊小爱口令可能会出现响应卡顿甚至超时。\n\n是否为您一键将它们加入常驻运行名单？`;
+
+            if (confirm(confirmMsg)) {
+              const newPlugins = Array.from(new Set([...currentPlugins, ...missingKeys]));
+
+              const putRes = await fetch('/api/v1/settings/plugin-keep-alive', {
+                method: 'PUT',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ plugins: newPlugins })
+              });
+
+              if (putRes.ok) {
+                alert('✅ 已成功开启常驻运行，响应速度将显著提升！');
+              } else {
+                alert('❌ 设置常驻运行失败，请前往宿主系统设置手动开启。');
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ 检查插件常驻运行状态失败", e);
+      }
+    }, 1500); // 延迟 1.5 秒执行，确保不卡顿首屏
+
+    // ==========================================
+    // 🌟 7. 小爱语音对话监听开关状态初始化与绑定
+    // ==========================================
+    // 🌟 提取出的状态切换独立函数 (可供点击事件或自动脚本复用)
+    window.setConversationMonitorStatus = async function(isEnabled, toggleElement) {
+        // 严格装配启用/禁用的不同载荷
+        const payload = isEnabled
+            ? { conversation_monitor_enabled: true }
+            : {
+                conversation_monitor_enabled: false,
+                voice_command_enabled: false,
+                external_search_enabled: false,
+                ai_config: {
+                    enabled: false,
+                    api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    api_key: "",
+                    model: "qwen-flash",
+                    timeout: 6
+                }
+            };
+
+        if (toggleElement) toggleElement.style.pointerEvents = "none"; // 发送请求期间防连点
+
+        try {
+            const res = await fetch('/api/v1/jsplugin/miot/config', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${getAuthToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error("API状态异常");
+            return true; // 成功则返回 true
+        } catch (err) {
+            console.warn("⚠️ 切换监听状态失败:", err);
+            if (toggleElement) toggleElement.checked = !isEnabled; // 请求失败，视觉上弹回原样
+            alert("❌ 状态切换失败，请检查网络或刷新重试");
+            return false;
+        } finally {
+            if (toggleElement) toggleElement.style.pointerEvents = "auto";
+        }
+    };
+
+    const monitorToggle = document.getElementById('toggle-conversation-monitor');
+    if (monitorToggle) {
+        // A. 页面加载时自动获取当前开关状态
+        fetch('/api/v1/jsplugin/miot/config', {
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+        }).then(res => res.json()).then(data => {
+            if (data && data.data) {
+                const isEnabled = !!data.data.conversation_monitor_enabled;
+                monitorToggle.checked = isEnabled;
+
+                console.log(`[状态检测] 页面加载完毕，当前对话监听为: ${isEnabled ? '已开启' : '已关闭'}`);
+
+                // 🌟 自动开启逻辑：检测到关闭时，立刻触发刚刚提取的函数，不加任何延迟
+                if (!isEnabled) {
+                    console.log(`[状态检测] 正在准备自动强制开启...`);
+                    window.setConversationMonitorStatus(true, monitorToggle).then(success => {
+                        if (success) {
+                            monitorToggle.checked = true;
+                            console.log(`✅ 自动开启对话监听成功`);
+                        }
+                    });
+                }
+            }
+        }).catch(() => {});
+
+        // B. 点击滑杆触发状态变更 (调用提取出的独立函数)
+        monitorToggle.addEventListener('change', async (e) => {
+            await window.setConversationMonitorStatus(e.target.checked, monitorToggle);
+        });
+    }
   });
 
   /* ==========================================
@@ -796,7 +955,37 @@
   });
 
   /* ==========================================
-     前端独立获取受控设备列表 (自动嵌入日志框第一行)
+     🌟 全局助手：渲染插件缺失毛玻璃遮罩
+     ========================================== */
+  window.showPluginDisabledMask = function(tabId) {
+    const pane = document.getElementById(tabId);
+    if (!pane || pane.querySelector('.plugin-disabled-mask')) return;
+
+    // 根据所在的标签页，匹配定制的插件名称
+    let pluginName = '';
+    if (tabId === 'tab-debug') pluginName = '智能音箱';
+    else if (tabId === 'tab-lxmusic') pluginName = '洛雪音源';
+    else if (tabId === 'tab-webdav') pluginName = 'WebDAV';
+
+    const mask = document.createElement('div');
+    mask.className = 'plugin-disabled-mask';
+    mask.innerHTML = `
+        <div class="plugin-disabled-card">
+            <div style="font-size: 40px; margin-bottom: 12px;">🧩</div>
+            <h3 style="margin: 0 0 24px 0; color: var(--md-on-surface); font-size: 18px; line-height: 1.5;">
+                需要安装并启用<br>“<span style="color: var(--md-primary);">${pluginName}</span>”插件
+            </h3>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                <button class="mh-btn" onclick="window.location.href = window.location.origin + '/#/settings'">⚙️ 前往系统设置</button>
+                <button class="mh-btn" style="background: transparent; border-color: var(--md-outline);" onclick="window.open('https://songloft-store.lllh.de/#/market', '_blank')">🛒 插件市场下载</button>
+            </div>
+        </div>
+    `;
+    pane.appendChild(mask);
+  };
+
+  /* ==========================================
+     前端独立获取受控设备列表 (含 403 拦截)
      ========================================== */
   let cachedDeviceStr = '';
 
@@ -808,6 +997,15 @@
       const res = await fetch('/api/v1/jsplugin/miot/mina/devices', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      // 🌟 拦截诊断页的 403 报错
+      if (res.status === 403) {
+         const json = await res.json().catch(() => ({}));
+         if (json.detail === 'plugin_disabled') {
+             window.showPluginDisabledMask('tab-debug', json.error);
+             return;
+         }
+      }
 
       if (res.ok) {
         const json = await res.json();
