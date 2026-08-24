@@ -7,15 +7,23 @@ import { searchLxMusicSongs } from './lxmusic';
 const router = createRouter();
 let wsClient: any = null;
 const TWIN_PLUGIN_ID = 'iwebplayer';
+let cachedServerHost = '';
 
 // ==========================================
-// 🚀 全局内存缓存 (零延迟读取)
+// 🌟 全局默认配置常量 (单点事实)
 // ==========================================
-let cachedServerHost: string = '';
+const DEF_SHUFFLE = ['随机', '乱序'];
+const DEF_PREFIX = ['前', '截取'];
+const DEF_SUFFIX = ['首', '首歌', '首音乐'];
+const DEF_LIMIT = 500;
 
-let cachedGlobalSettings: { targetPlaylist?: string; hitSound?: string } = {
+let cachedGlobalSettings: any = {
     targetPlaylist: 'iWebPlayer推送',
-    hitSound: 'SongLoft_for_u.a2ac34c5.mp3'
+    hitSound: 'SongLoft_for_u.a2ac34c5.mp3',
+    shuffleWords: [...DEF_SHUFFLE],
+    limitPrefixes: [...DEF_PREFIX],
+    limitSuffixes: [...DEF_SUFFIX],
+    defaultLimit: DEF_LIMIT
 };
 
 // ⏱️ 提示音定时器句柄映射表 (${accountId}_${deviceId})
@@ -284,6 +292,126 @@ async function fetchSmartCorrection(keyword: string): Promise<string | null> {
     return null;
 }
 
+
+// ==========================================
+// 🧠 语音智能解析 (NLP) & 平台词提取
+// ==========================================
+const PLAT_MAP: Record<string, string> = { wy: '网易云', tx: 'QQ音乐', kg: '酷狗', kw: '酷我', mg: '咪咕' };
+const PLAT_WORDS: Record<string, string[]> = {
+    tx: ['qq音乐', '腾讯音乐', 'q音乐', 'qq', '腾讯'],
+    kg: ['酷狗音乐', '酷狗'],
+    kw: ['酷我音乐', '酷我'],
+    wy: ['网易云音乐', '网易云', '云音乐', '网易'],
+    mg: ['咪咕音乐', '咪咕']
+};
+
+// 预处理匹配表：最长匹配优先，防止短词误杀长词
+const PLAT_MATCHER = (() => {
+    const arr: [string, string][] = [];
+    for (const p in PLAT_WORDS) for (const w of PLAT_WORDS[p]) arr.push([p, w]);
+    arr.sort((a, b) => b[1].length - a[1].length);
+    return arr;
+})();
+
+function extractPlatform(text: string) {
+    let platform: string | null = null;
+    let rest = text || '';
+    for (const [p, w] of PLAT_MATCHER) {
+        const idx = rest.indexOf(w);
+        if (idx >= 0) {
+            platform = p;
+            rest = (rest.slice(0, idx) + rest.slice(idx + w.length)).trim();
+            break;
+        }
+    }
+    return { platform, keyword: rest.trim() };
+}
+
+const VERB_TOKENS = ['播放', '搜索']; // 恢复原样，把乱序剥离任务交给动态配置
+const CONNECTIVE_TRIM = ['中的', '里面', '里的', '里', '的', '中', '上', '下', '之'];
+
+function stripEdges(s: string) {
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const c of CONNECTIVE_TRIM) {
+            if (s.startsWith(c)) { s = s.slice(c.length); changed = true; break; }
+            if (s.endsWith(c)) { s = s.slice(0, s.length - c.length); changed = true; break; }
+        }
+    }
+    return s;
+}
+
+// 解析整句：意图命中 + 提取平台 + 提取动态乱序 + 提取动态截断 + 去废话
+function parseVoiceCommand(query: string) {
+    const trimmed = (query || '').trim();
+    if (!trimmed) return null;
+
+    let shuffleFlag = false;
+    let textToParse = trimmed;
+
+    // 🌟 1. 动态提取并抠除“乱序/随机”指令词
+    const shuffleWords = Array.isArray(cachedGlobalSettings.shuffleWords) && cachedGlobalSettings.shuffleWords.length > 0 ? cachedGlobalSettings.shuffleWords : DEF_SHUFFLE;
+    for (const sw of shuffleWords) {
+        if (textToParse.includes(sw)) {
+            shuffleFlag = true;
+            textToParse = textToParse.split(sw).join(''); // 抠掉乱序词
+        }
+    }
+
+    // 2. 寻找被包含的最长口令词
+    let best: any = null, bestLen = 0, matchedWord = '';
+    for (const w in voiceRoutes) {
+        if (w && textToParse.includes(w) && w.length > bestLen) {
+            bestLen = w.length; best = voiceRoutes[w]; matchedWord = w;
+        }
+    }
+    if (!best) return null;
+
+    // 3. 提取平台词并抠除
+    const ep = extractPlatform(textToParse);
+    let kw = ep.keyword.split(matchedWord).join('');
+
+    // 4. 去除动词和连词废话
+    for (const v of VERB_TOKENS) kw = kw.split(v).join('');
+    kw = stripEdges(kw.trim()).trim();
+
+    // 🌟 5. 全局动态数量提取引擎 (根据用户配置拼接正则)
+    let limit = 0;
+    const limitPrefixes = Array.isArray(cachedGlobalSettings.limitPrefixes) && cachedGlobalSettings.limitPrefixes.length > 0 ? cachedGlobalSettings.limitPrefixes : DEF_PREFIX;
+    const limitSuffixes = Array.isArray(cachedGlobalSettings.limitSuffixes) && cachedGlobalSettings.limitSuffixes.length > 0 ? cachedGlobalSettings.limitSuffixes : DEF_SUFFIX;
+
+    const prefixStr = limitPrefixes.join('|');
+    const suffixStr = limitSuffixes.join('|');
+    // 动态生成正则，例如：(?:前|共)?(\d+|[一二两三...]+)\s*(?:首|首歌|...)$
+    const limitRegex = new RegExp(`(?:${prefixStr})?(\\d+|[一二两三四五六七八九十]+)\\s*(?:${suffixStr})$`);
+
+    const limitMatch = kw.match(limitRegex);
+    if (limitMatch) {
+        const numStr = limitMatch[1];
+        if (/^\d+$/.test(numStr)) {
+            limit = parseInt(numStr, 10);
+        } else {
+            const zhMap: Record<string, number> = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+            if (numStr.length === 1) limit = zhMap[numStr] || 0;
+            else if (numStr.length === 2 && numStr[0] === '十') limit = 10 + (zhMap[numStr[1]] || 0);
+            else if (numStr.length === 2 && numStr[1] === '十') limit = (zhMap[numStr[0]] || 0) * 10;
+            else if (numStr.length === 3 && numStr[1] === '十') limit = (zhMap[numStr[0]] || 0) * 10 + (zhMap[numStr[2]] || 0);
+            else limit = cachedGlobalSettings.defaultLimit || DEF_LIMIT;
+        }
+        kw = kw.replace(limitMatch[0], '').trim();
+    }
+
+    return {
+        type: best.type, engine: best.engine, node: best.node,
+        quality: best.quality, strategy: best.strategy,
+        platform: ep.platform, keyword: kw, matchedWord,
+        limit,
+        shuffleFlag // 直接从解析器返回乱序标记
+    };
+}
+
+
 // ==========================================
 // 🚀 核心：全局意图路由表
 // ==========================================
@@ -444,7 +572,8 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
 }
 
 // 🎯 语音口令处理总入口
-async function handleVoiceCommand(cmdType: string, engine: string, nodeName: string, rawKeyword: string, accountId: string, deviceId: string, quality?: string, strategy?: string) {
+async function handleVoiceCommand(cmdType: string, engine: string, nodeName: string, rawKeyword: string, accountId: string, deviceId: string, quality?: string, strategy?: string, parsedPlatform?: string | null, shuffleFlag?: boolean, parsedLimit?: number) {
+    const doShuffle = !!shuffleFlag;
 
     // === LXMusic 处理分支 ===
     if (engine === 'lxmusic') {
@@ -452,7 +581,10 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         let actualQuality = quality || '320k';
         let actualStrategy = strategy || 'first';
 
-        if (nodeName === 'default') {
+        if (parsedPlatform) {
+            actualPlatform = parsedPlatform; // 🌟 语音显式指定的平台词优先级最高
+            pushDebugLog(`🎯 语音平台词命中: [${PLAT_MAP[actualPlatform] || actualPlatform}]，覆盖节点配置`);
+        } else if (nodeName === 'default') {
             try {
                 const cfgRaw = await songloft.storage.get('lxmusic_config');
                 const cfg = typeof cfgRaw === 'string' ? JSON.parse(cfgRaw) : (cfgRaw || {});
@@ -478,13 +610,20 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
             // 调用搜歌函数并拿到歌曲列表
             const songs = await searchLxMusicSongs(cmdType, actualPlatform, rawKeyword, actualStrategy, actualQuality, pushDebugLog);
 
-            if (songs === null) {
-                await playFailedSound(accountId, deviceId);
-            } else if (songs.length === 0) {
+            if (songs === null || songs.length === 0) {
                 await playFailedSound(accountId, deviceId);
             } else {
-                // 走统一流水线，传入 'lxmusic'
-                await createPushPlaylistAndPlay(songs, accountId, deviceId, 'lxmusic');
+                let effectiveLimit = (parsedLimit && parsedLimit > 0) ? parsedLimit : (cachedGlobalSettings.defaultLimit || 500);
+                let finalSongs = doShuffle && songs.length > 1 ? songs.slice().sort(() => Math.random() - 0.5) : songs;
+                if (doShuffle && songs.length > 1) pushDebugLog(`🎲 已开启随机播放，打乱 ${songs.length} 首歌曲顺序`);
+
+                // 🌟 统一截取逻辑
+                if (finalSongs.length > effectiveLimit) {
+                    pushDebugLog(`✂️ 触发数量限制: 已截取前 ${effectiveLimit} 首歌曲`);
+                    finalSongs = finalSongs.slice(0, effectiveLimit);
+                }
+
+                await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'lxmusic');
             }
         } catch (e) {
             pushDebugLog(`⚠️ LXMusic 执行异常: ${e}`);
@@ -523,8 +662,16 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         }
 
         if (songs && songs.length > 0) {
-            // 走统一流水线，传入 'webdav'
-            await createPushPlaylistAndPlay(songs, accountId, deviceId, 'webdav');
+            let effectiveLimit = (parsedLimit && parsedLimit > 0) ? parsedLimit : (cachedGlobalSettings.defaultLimit || 500);
+            let finalSongs = doShuffle && songs.length > 1 ? songs.slice().sort(() => Math.random() - 0.5) : songs;
+            if (doShuffle && songs.length > 1) pushDebugLog(`🎲 已开启随机播放，打乱 ${songs.length} 首歌曲顺序`);
+
+            if (finalSongs.length > effectiveLimit) {
+                pushDebugLog(`✂️ 触发数量限制: 已截取前 ${effectiveLimit} 首歌曲`);
+                finalSongs = finalSongs.slice(0, effectiveLimit);
+            }
+
+            await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'webdav');
         } else {
             pushDebugLog(`💀 彻底未搜到关于此关键字的音乐，放弃操作`);
             await playFailedSound(accountId, deviceId);
@@ -602,12 +749,17 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
 
         if (result.songs.length > 0) {
             let matchedSongs = result.songs;
-            if (matchedSongs.length > 500) {
-                pushDebugLog(`⚠️ 该歌单曲目数超过 500 首，已自动截取前 500 首`);
-                matchedSongs = matchedSongs.slice(0, 500);
+
+            let effectiveLimit = (parsedLimit && parsedLimit > 0) ? parsedLimit : (cachedGlobalSettings.defaultLimit || 500);
+            let finalSongs = doShuffle && matchedSongs.length > 1 ? matchedSongs.slice().sort(() => Math.random() - 0.5) : matchedSongs;
+            if (doShuffle && matchedSongs.length > 1) pushDebugLog(`🎲 已开启随机播放，打乱 ${matchedSongs.length} 首歌曲顺序`);
+
+            if (finalSongs.length > effectiveLimit) {
+                pushDebugLog(`✂️ 触发数量限制: 已截取前 ${effectiveLimit} 首歌曲`);
+                finalSongs = finalSongs.slice(0, effectiveLimit);
             }
-            // 走统一流水线，传入 'webdav'
-            await createPushPlaylistAndPlay(matchedSongs, accountId, deviceId, 'webdav');
+
+            await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'webdav');
         } else {
             pushDebugLog(`💀 彻底未找到匹配的歌单，放弃操作`);
             await playFailedSound(accountId, deviceId);
@@ -664,25 +816,23 @@ async function connectWebSocket() {
 
                     if (fullText && typeof fullText === 'string') {
                         const trimmedText = fullText.trim();
-                        for (const cmdPrefix in voiceRoutes) {
-                            if (trimmedText.startsWith(cmdPrefix)) {
-                                const target = voiceRoutes[cmdPrefix];
-                                const keyword = trimmedText.replace(cmdPrefix, '').trim();
 
-                                if (keyword) {
-                                    pushDebugLog(`🎯 命中口令词: [${cmdPrefix}], 完整指令: "${trimmedText}"`);
-                                    playHitSound(msg.data.account_id, msg.data.device_id);
+                        // 🌟 调用全新 NLP 引擎解析指令
+                        const parsed = parseVoiceCommand(trimmedText);
 
-                                    handleVoiceCommand(target.type, target.engine, target.node, keyword, msg.data.account_id, msg.data.device_id, target.quality, target.strategy)
-                                        .catch(async () => {
-                                            await playFailedSound(msg.data.account_id, msg.data.device_id);
-                                        })
-                                        .finally(() => {
-                                            pushDebugLog('========================================');
-                                        });
-                                }
-                                break; // 命中一次后跳出循环
-                            }
+                        if (parsed && parsed.keyword) {
+                            const platDesc = parsed.platform ? ` 平台词: [${PLAT_MAP[parsed.platform] || parsed.platform}]` : '';
+                            pushDebugLog(`🎯 命中口令词: [${parsed.matchedWord}], 完整指令: "${trimmedText}"${platDesc}`);
+                            playHitSound(msg.data.account_id, msg.data.device_id);
+
+                            // 传入解析好的参数
+                            handleVoiceCommand(parsed.type, parsed.engine, parsed.node, parsed.keyword, msg.data.account_id, msg.data.device_id, parsed.quality, parsed.strategy, parsed.platform, parsed.shuffleFlag, parsed.limit)
+                                .catch(async () => {
+                                    await playFailedSound(msg.data.account_id, msg.data.device_id);
+                                })
+                                .finally(() => {
+                                    pushDebugLog('========================================');
+                                });
                         }
                     }
                 }
