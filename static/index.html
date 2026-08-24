@@ -340,6 +340,49 @@
           </select>
         </div>
       </div>
+
+      <!-- 👇 🌟 新增的高阶 NLP 胶囊设置区块 -->
+      <div class="card" style="margin-top: 12px;">
+        <div class="card-title" style="margin-bottom: 12px;">🗣️ 语音高阶词汇定制 (NLP)</div>
+
+        <div class="mh-field">
+          <label style="font-weight: bold; color: var(--md-on-surface);">获取到的歌曲乱序洗牌</label>
+          <div id="nlp-tags-shuffle" class="mh-tag-container"></div>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <input type="text" id="nlp-input-shuffle" class="mh-input" placeholder="输入词汇，如：随便放">
+            <button class="mh-btn" id="nlp-btn-add-shuffle">➕ 添加</button>
+          </div>
+          <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">只要句子里包含这些词，获取到的歌曲列表就会被打乱。(默认不打乱)</div>
+        </div>
+
+        <div class="mh-divider" style="box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08); opacity: 0.7;"></div>
+
+        <div class="mh-field">
+          <label style="font-weight: bold; color: var(--md-on-surface);">获取数量口令限定 (默认/最大首数)</label>
+          <input type="number" id="global-default-limit" class="mh-input" placeholder="例如：500" value="500">
+          <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">如果语音指令未指定具体数量，默认获取数量不超过该值。</div>
+        </div>
+
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="mh-field" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+              <label style="font-weight: bold; color: var(--md-on-surface);">数量截取前缀(非必须)</label>
+              <div id="nlp-tags-prefix" class="mh-tag-container"></div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <input type="text" id="nlp-input-prefix" class="mh-input" placeholder="输入词汇，如：只听">
+                <button class="mh-btn" id="nlp-btn-add-prefix">➕ 添加</button>
+              </div>
+            </div>
+            <div class="mh-field" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+              <label style="font-weight: bold; color: var(--md-on-surface);">数量截取后缀</label>
+              <div id="nlp-tags-suffix" class="mh-tag-container"></div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <input type="text" id="nlp-input-suffix" class="mh-input" placeholder="输入词汇，如：曲">
+                <button class="mh-btn" id="nlp-btn-add-suffix">➕ 添加</button>
+              </div>
+            </div>
+        </div>
+        <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 8px;">识别规则：[前缀] + 数字 + [后缀]。该口令必须放在最后。例如“网盘歌单伍佰前20首”。前缀是可选的。“网盘歌单伍佰20首”系统也能懂</div>
+      </div>
     </div>
 
     <div id="tab-resume" class="mh-pane"><div class="card">续播功能建设中，打算支持iWebPlayer和有声书的续播...</div></div>
@@ -353,7 +396,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.5.7</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.6.0</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -386,6 +429,13 @@
         </div>
         <p class="desc" style="font-size: 12px; margin: 0;">
           如果这个插件对你有帮助，欢迎去 GitHub 点个 <strong>Star</strong> 支持一下！
+        </p>
+
+        <div class="mh-divider"></div>
+
+        <div class="card-title" style="margin-bottom: 12px;">🙌 特别鸣谢</div>
+        <p class="desc" style="line-height: 1.6; color: var(--md-on-surface); margin: 0; font-size: 13px;">
+          特别感谢社区开发者 <strong style="color: var(--md-primary);">@qqdwtypm</strong> 为本插件提供了深度的代码级重构，以及在 NLP 智能解析、高阶词汇定制、多引擎匹配等众多高级功能上的核心逻辑支持。
         </p>
 
         <div class="mh-divider"></div>
@@ -666,13 +716,72 @@
   };
 
   /* ==========================================
+     🌟 NLP 胶囊动态管理系统 (引入常量，单点事实)
+     ========================================== */
+  const DEF_SHUFFLE = ['随机', '乱序'];
+  const DEF_PREFIX = ['前', '截取'];
+  const DEF_SUFFIX = ['首', '首歌', '首音乐'];
+  const DEF_LIMIT = 500;
+
+  // 初始变量赋值，使用常量拷贝
+  let nlpShuffleWords = [...DEF_SHUFFLE];
+  let nlpLimitPrefixes = [...DEF_PREFIX];
+  let nlpLimitSuffixes = [...DEF_SUFFIX];
+
+  function renderNlpTags(type) {
+      let container, arr;
+      if (type === 'shuffle') { container = document.getElementById('nlp-tags-shuffle'); arr = nlpShuffleWords; }
+      else if (type === 'prefix') { container = document.getElementById('nlp-tags-prefix'); arr = nlpLimitPrefixes; }
+      else if (type === 'suffix') { container = document.getElementById('nlp-tags-suffix'); arr = nlpLimitSuffixes; }
+      if (!container) return;
+
+      container.innerHTML = '';
+      arr.forEach((word, idx) => {
+          const tag = document.createElement('div');
+          tag.className = 'mh-tag';
+          tag.innerHTML = `<span>${word}</span> <span class="mh-tag-close" title="移除">×</span>`;
+          tag.querySelector('.mh-tag-close').addEventListener('click', () => {
+              arr.splice(idx, 1);
+              renderNlpTags(type);
+              saveGlobalSettings(); // 删掉后自动保存
+          });
+          container.appendChild(tag);
+      });
+  }
+
+  function addNlpWord(type) {
+      let inputEl, arr;
+      if (type === 'shuffle') { inputEl = document.getElementById('nlp-input-shuffle'); arr = nlpShuffleWords; }
+      else if (type === 'prefix') { inputEl = document.getElementById('nlp-input-prefix'); arr = nlpLimitPrefixes; }
+      else if (type === 'suffix') { inputEl = document.getElementById('nlp-input-suffix'); arr = nlpLimitSuffixes; }
+
+      const val = inputEl.value.trim();
+      if (!val) return;
+      if (arr.includes(val)) return alert('⚠️ 该词汇已存在');
+
+      arr.push(val);
+      inputEl.value = '';
+      renderNlpTags(type);
+      saveGlobalSettings(); // 新增后自动保存
+  }
+
+  /* ==========================================
      全局设置自动保存函数
      ========================================== */
   async function saveGlobalSettings() {
     const targetPlaylist = document.getElementById('global-target-playlist')?.value || 'iWebPlayer推送';
     const hitSound = document.getElementById('global-hit-sound')?.value || '';
 
-    const payload = { targetPlaylist, hitSound };
+    const defaultLimit = parseInt(document.getElementById('global-default-limit')?.value, 10) || 500;
+    const payload = {
+        targetPlaylist,
+        hitSound,
+        shuffleWords: nlpShuffleWords,
+        limitPrefixes: nlpLimitPrefixes,
+        limitSuffixes: nlpLimitSuffixes,
+        defaultLimit
+    };
+
     try {
       await window.SongloftPlugin.apiPost('/store', {
         key: 'xiaoai_global_settings',
@@ -685,16 +794,90 @@
   }
 
   /* ==========================================
+     🌟 首次安装初始化：兜底写入全局设置与 NLP 默认词汇
+     ========================================== */
+  async function initGlobalSettingsOnFirstLoad() {
+      try {
+          const res = await window.SongloftPlugin.apiGet('/store?key=xiaoai_global_settings');
+          let needSave = false;
+          let parsed = {};
+
+          if (res && res.data && res.data !== 'null' && res.data !== '[]') {
+              try { parsed = JSON.parse(res.data); } catch(e) {}
+          } else {
+              needSave = true; // 完全没数据，必然是首次安装或被清空
+          }
+
+          // 1. 检查并兜底注入：乱序词汇
+          if (!Array.isArray(parsed.shuffleWords) || parsed.shuffleWords.length === 0) {
+              parsed.shuffleWords = [...DEF_SHUFFLE];
+              needSave = true;
+          } else {
+              nlpShuffleWords = parsed.shuffleWords;
+          }
+
+          // 2. 检查并兜底注入：数量前缀
+          if (!Array.isArray(parsed.limitPrefixes) || parsed.limitPrefixes.length === 0) {
+              parsed.limitPrefixes = [...DEF_PREFIX];
+              needSave = true;
+          } else {
+              nlpLimitPrefixes = parsed.limitPrefixes;
+          }
+
+          // 3. 检查并兜底注入：数量后缀
+          if (!Array.isArray(parsed.limitSuffixes) || parsed.limitSuffixes.length === 0) {
+              parsed.limitSuffixes = [...DEF_SUFFIX];
+              needSave = true;
+          } else {
+              nlpLimitSuffixes = parsed.limitSuffixes;
+          }
+
+          // 4. 检查并兜底注入：默认获取首数
+          if (typeof parsed.defaultLimit !== 'number') {
+              parsed.defaultLimit = DEF_LIMIT;
+              needSave = true;
+          }
+
+          // 如果发现有任何缺失（首次安装），则把完整版对象重新存入数据库
+          if (needSave) {
+              parsed.targetPlaylist = parsed.targetPlaylist || 'iWebPlayer推送';
+              parsed.hitSound = parsed.hitSound !== undefined ? parsed.hitSound : 'SongLoft_for_u.a2ac34c5.mp3';
+
+              await window.SongloftPlugin.apiPost('/store', {
+                  key: 'xiaoai_global_settings',
+                  value: JSON.stringify(parsed)
+              });
+              console.log("✅ 首次安装兜底：已自动向数据库注入 NLP 语音高阶配置与默认值！");
+          }
+      } catch(e) {
+          console.warn("⚠️ 初始化全局设置失败", e);
+      }
+  }
+
+  /* ==========================================
      【第一套逻辑】：页面加载时无条件绑定下拉框变动事件
      彻底与数据拉取解耦，哪怕接口全断，改变下拉框也必触发保存
      ========================================== */
   document.addEventListener('DOMContentLoaded', () => {
+
+    initGlobalSettingsOnFirstLoad();
+
+    // 🌟 0. 绑定 NLP 胶囊相关的添加事件
+    document.getElementById('nlp-btn-add-shuffle')?.addEventListener('click', () => addNlpWord('shuffle'));
+    document.getElementById('nlp-input-shuffle')?.addEventListener('keypress', (e) => { if(e.key === 'Enter') addNlpWord('shuffle'); });
+
+    document.getElementById('nlp-btn-add-prefix')?.addEventListener('click', () => addNlpWord('prefix'));
+    document.getElementById('nlp-input-prefix')?.addEventListener('keypress', (e) => { if(e.key === 'Enter') addNlpWord('prefix'); });
+
+    document.getElementById('nlp-btn-add-suffix')?.addEventListener('click', () => addNlpWord('suffix'));
+    document.getElementById('nlp-input-suffix')?.addEventListener('keypress', (e) => { if(e.key === 'Enter') addNlpWord('suffix'); });
 
     // 1. 命中歌曲推送至歌单 -> 绑定 change 事件
     document.getElementById('global-target-playlist')?.addEventListener('change', saveGlobalSettings);
 
     // 2. 前置语音提示音 -> 绑定 change 事件
     document.getElementById('global-hit-sound')?.addEventListener('change', saveGlobalSettings);
+    document.getElementById('global-default-limit')?.addEventListener('change', saveGlobalSettings);
 
     // 3. 标签栏横向滚动与悬浮箭头控制
     const tabsEl = document.getElementById('mh-tabs-scroll');
@@ -901,7 +1084,6 @@
 
   /* ==========================================
      【第二套逻辑】：点击设置标签仅执行“数据拉取与填充”
-     每次点击都触发，绝不包含任何 addEventListener 的事件挂载
      ========================================== */
   document.querySelector('[data-target="tab-settings"]')?.addEventListener('click', async () => {
     try {
@@ -921,6 +1103,19 @@
       if (soundSelect && savedSettings.hitSound !== undefined) {
         soundSelect.value = savedSettings.hitSound;
       }
+
+      // 🌟 恢复 NLP 胶囊的数组，如果没配过就用我们在顶部声明的默认数组
+      if (Array.isArray(savedSettings.shuffleWords)) nlpShuffleWords = savedSettings.shuffleWords;
+      if (Array.isArray(savedSettings.limitPrefixes)) nlpLimitPrefixes = savedSettings.limitPrefixes;
+      if (Array.isArray(savedSettings.limitSuffixes)) nlpLimitSuffixes = savedSettings.limitSuffixes;
+
+      // 触发界面绘制
+      renderNlpTags('shuffle');
+      renderNlpTags('prefix');
+      renderNlpTags('suffix');
+
+      const limitInput = document.getElementById('global-default-limit');
+      if (limitInput) limitInput.value = savedSettings.defaultLimit || 500;
 
       // 2. 拉取系统歌单数据并增补歌单下拉框
       try {
