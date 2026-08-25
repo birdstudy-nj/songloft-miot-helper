@@ -14,8 +14,10 @@ let cachedServerHost = '';
 // ==========================================
 const DEF_SHUFFLE = ['随机', '乱序'];
 const DEF_PREFIX = ['前', '截取'];
-const DEF_SUFFIX = ['首', '首歌', '首音乐'];
+const DEF_SUFFIX = ['首', '首歌'];
 const DEF_LIMIT = 500;
+const DEF_ENABLE_SHUFFLE = true;
+const DEF_ENABLE_LIMIT = true;
 
 let cachedGlobalSettings: any = {
     targetPlaylist: 'iWebPlayer推送',
@@ -347,15 +349,17 @@ function parseVoiceCommand(query: string) {
     const trimmed = (query || '').trim();
     if (!trimmed) return null;
 
+    // 🌟 1. 动态提取并抠除“乱序/随机”指令词
     let shuffleFlag = false;
     let textToParse = trimmed;
 
-    // 🌟 1. 动态提取并抠除“乱序/随机”指令词
-    const shuffleWords = Array.isArray(cachedGlobalSettings.shuffleWords) && cachedGlobalSettings.shuffleWords.length > 0 ? cachedGlobalSettings.shuffleWords : DEF_SHUFFLE;
-    for (const sw of shuffleWords) {
-        if (textToParse.includes(sw)) {
-            shuffleFlag = true;
-            textToParse = textToParse.split(sw).join(''); // 抠掉乱序词
+    if (cachedGlobalSettings.enableShuffle !== false) {
+        const shuffleWords = Array.isArray(cachedGlobalSettings.shuffleWords) && cachedGlobalSettings.shuffleWords.length > 0 ? cachedGlobalSettings.shuffleWords : DEF_SHUFFLE;
+        for (const sw of shuffleWords) {
+            if (textToParse.includes(sw)) {
+                shuffleFlag = true;
+                textToParse = textToParse.split(sw).join('');
+            }
         }
     }
 
@@ -376,38 +380,59 @@ function parseVoiceCommand(query: string) {
     for (const v of VERB_TOKENS) kw = kw.split(v).join('');
     kw = stripEdges(kw.trim()).trim();
 
-    // 🌟 5. 全局动态数量提取引擎 (根据用户配置拼接正则)
+    // 🌟 5. 全局动态数量提取引擎 (智能双端触碰算法)
     let limit = 0;
-    const limitPrefixes = Array.isArray(cachedGlobalSettings.limitPrefixes) && cachedGlobalSettings.limitPrefixes.length > 0 ? cachedGlobalSettings.limitPrefixes : DEF_PREFIX;
-    const limitSuffixes = Array.isArray(cachedGlobalSettings.limitSuffixes) && cachedGlobalSettings.limitSuffixes.length > 0 ? cachedGlobalSettings.limitSuffixes : DEF_SUFFIX;
 
-    const prefixStr = limitPrefixes.join('|');
-    const suffixStr = limitSuffixes.join('|');
-    // 动态生成正则，例如：(?:前|共)?(\d+|[一二两三...]+)\s*(?:首|首歌|...)$
-    const limitRegex = new RegExp(`(?:${prefixStr})?(\\d+|[一二两三四五六七八九十]+)\\s*(?:${suffixStr})$`);
+    if (cachedGlobalSettings.enableLimit !== false) {
+        const limitPrefixes = Array.isArray(cachedGlobalSettings.limitPrefixes) && cachedGlobalSettings.limitPrefixes.length > 0 ? cachedGlobalSettings.limitPrefixes : DEF_PREFIX;
+        const limitSuffixes = Array.isArray(cachedGlobalSettings.limitSuffixes) && cachedGlobalSettings.limitSuffixes.length > 0 ? cachedGlobalSettings.limitSuffixes : DEF_SUFFIX;
 
-    const limitMatch = kw.match(limitRegex);
-    if (limitMatch) {
-        const numStr = limitMatch[1];
-        if (/^\d+$/.test(numStr)) {
-            limit = parseInt(numStr, 10);
-        } else {
-            const zhMap: Record<string, number> = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
-            if (numStr.length === 1) limit = zhMap[numStr] || 0;
-            else if (numStr.length === 2 && numStr[0] === '十') limit = 10 + (zhMap[numStr[1]] || 0);
-            else if (numStr.length === 2 && numStr[1] === '十') limit = (zhMap[numStr[0]] || 0) * 10;
-            else if (numStr.length === 3 && numStr[1] === '十') limit = (zhMap[numStr[0]] || 0) * 10 + (zhMap[numStr[2]] || 0);
-            else limit = cachedGlobalSettings.defaultLimit || DEF_LIMIT;
+        const prefixStr = limitPrefixes.join('|');
+        const suffixStr = limitSuffixes.join('|');
+
+        // 构建头部触碰和尾部触碰的动态正则
+        const endRegex = new RegExp(`(?:${prefixStr})?(\\d+|[一二两三四五六七八九十]+)\\s*(?:${suffixStr})$`);
+        const startRegex = new RegExp(`^(?:${prefixStr})?(\\d+|[一二两三四五六七八九十]+)\\s*(?:${suffixStr})`);
+
+        // 优先检测尾部（解决包含数量词的歌名问题），如果尾部没有，再检测头部
+        let limitMatch = kw.match(endRegex);
+        if (!limitMatch) {
+            limitMatch = kw.match(startRegex);
         }
-        kw = kw.replace(limitMatch[0], '').trim();
+
+        if (limitMatch) {
+            const numStr = limitMatch[1];
+            if (/^\d+$/.test(numStr)) {
+                limit = parseInt(numStr, 10);
+            } else {
+                const zhMap: Record<string, number> = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+                if (numStr.length === 1) limit = zhMap[numStr] || 0;
+                else if (numStr.length === 2 && numStr[0] === '十') limit = 10 + (zhMap[numStr[1]] || 0);
+                else if (numStr.length === 2 && numStr[1] === '十') limit = (zhMap[numStr[0]] || 0) * 10;
+                else if (numStr.length === 3 && numStr[1] === '十') limit = (zhMap[numStr[0]] || 0) * 10 + (zhMap[numStr[2]] || 0);
+                else limit = cachedGlobalSettings.defaultLimit || DEF_LIMIT;
+            }
+            // 成功抠出数字后，将其从关键字中剔除，留下纯净的歌名
+            kw = kw.replace(limitMatch[0], '').trim();
+        } else {
+            // 🌟 核心逻辑：如果语音没带数量，优先看这个独立口令有没有配置 limit，没有再走全局兜底
+            limit = best.limit ? best.limit : (cachedGlobalSettings.defaultLimit || DEF_LIMIT);
+        }
+    } else {
+        // 如果开关未启用，直接赋默认值，原封不动保留 keyword
+        // 但此时我们仍然要尊重该独立口令可能配置的特殊 limit
+        limit = best.limit ? best.limit : (cachedGlobalSettings.defaultLimit || DEF_LIMIT);
     }
+
+    // 🌟 核心逻辑：如果语音没说乱序，看看这个独立口令有没有强行开启乱序
+    const finalShuffle = shuffleFlag || !!best.shuffle;
 
     return {
         type: best.type, engine: best.engine, node: best.node,
         quality: best.quality, strategy: best.strategy,
         platform: ep.platform, keyword: kw, matchedWord,
         limit,
-        shuffleFlag // 直接从解析器返回乱序标记
+        shuffleFlag: finalShuffle // 🌟 传出最终运算后的乱序标记
     };
 }
 
@@ -437,24 +462,45 @@ async function rebuildVoiceRoutes() {
             if (!Array.isArray(wdConfigs)) wdConfigs = [];
         }
 
+        // 🌟 5 大默认指令定义
+        const defaultLx = [
+            { engine: 'lxmusic', type: 'play', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌单'] },
+            { engine: 'lxmusic', type: 'search', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌曲'] },
+            { engine: 'lxmusic', type: 'singer', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌手'] },
+            { engine: 'lxmusic', type: 'album', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索专辑'] },
+            { engine: 'lxmusic', type: 'rank', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索榜单'] }
+
+        ];
+
         if (!lxRaw || lxRaw === 'null' || lxRaw === '[]') {
-            lxConfigs = [
-                { engine: 'lxmusic', type: 'play', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌单'] },
-                { engine: 'lxmusic', type: 'search', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌曲'] }
-            ];
+            // 全新安装：全部注入
+            lxConfigs = [...defaultLx];
             await safeStorageSet('xiaoai_lx_configs', JSON.stringify(lxConfigs));
         } else {
+            // 升级覆盖：查漏补缺
             try { lxConfigs = typeof lxRaw === 'string' ? JSON.parse(lxRaw) : lxRaw; } catch (e) {}
             if (!Array.isArray(lxConfigs)) lxConfigs = [];
+
+            let added = false;
+            for (const d of defaultLx) {
+                if (!lxConfigs.find(c => c.isDefault && c.type === d.type && c.engine === d.engine)) {
+                    lxConfigs.push(d);
+                    added = true;
+                }
+            }
+            if (added) await safeStorageSet('xiaoai_lx_configs', JSON.stringify(lxConfigs));
         }
 
         const allConfigs = [...wdConfigs, ...lxConfigs];
 
         for (const cfg of allConfigs) {
+            // 🌟 拦截被禁用的口令组，如果设为 false 则直接跳过，不挂载到路由表
+            if (cfg.enabled === false) continue;
+
             const engine = cfg.engine || 'webdav';
             if (Array.isArray(cfg.cmds)) {
                 for (const cmd of cfg.cmds) {
-                    if (cmd) voiceRoutes[cmd] = { type: cfg.type, engine, node: cfg.node, quality: cfg.quality, strategy: cfg.strategy };
+                    if (cmd) voiceRoutes[cmd] = { type: cfg.type, engine, node: cfg.node, quality: cfg.quality, strategy: cfg.strategy, limit: cfg.limit, shuffle: cfg.shuffle };
                 }
             }
         }

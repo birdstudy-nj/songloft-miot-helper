@@ -21,7 +21,6 @@ function parsePlayCount(str: string): number {
     return isNaN(num) ? 0 : num;
 }
 
-// 🌟 重构：改名为 searchLxMusicSongs，剥离所有的建歌单与播放逻辑，纯粹返回歌曲数组
 export async function searchLxMusicSongs(cmdType: string, platform: string, keyword: string, strategy: string, targetQuality: string, logFn: (msg: string) => void): Promise<any[] | null> {
     const hostUrl = await songloft.plugin.getHostUrl();
     const token = await songloft.plugin.getToken();
@@ -92,8 +91,141 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
             }
             logFn(`🎯 成功拉取并处理 ${lxSongsToImport.length} 首歌曲`);
         } catch(e) { logFn(`❌ LXMusic 搜单/详情接口异常: ${e}`); return null; }
+
+    } else if (cmdType === 'singer') {
+        logFn(`🎤 开始在 LXMusic [${cnPlatform}] 检索歌手: [${keyword}]`);
+        try {
+            let raw: any[] = [];
+
+            // 🌟 1. 首选：原生 singer 接口 (尝试翻页取 40~50 首左右)
+            try {
+                let page = 1;
+                while (raw.length < 50 && page <= 3) {
+                    const res = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify({ keyword: keyword, source_id: platform, type: 'singer', page: page }) });
+                    const data = await res.json();
+                    const list = data?.data?.list || [];
+                    if (list.length === 0) break;
+                    raw = raw.concat(list);
+                    if (data?.data?.has_more === false) break;
+                    page++;
+                }
+            } catch (e) { logFn(`⚠️ 原生歌手接口异常，准备降级: ${e}`); }
+
+            // 🌟 2. 双保险兜底：降级至 song 泛搜，只取首页前20首
+            if (raw.length === 0) {
+                logFn(`⚠️ 专属歌手接口无数据，降级使用单曲泛搜模式(仅截取首页20首)...`);
+                const res = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify({ keyword: keyword, source_id: platform, type: 'song', page: 1 }) });
+                const data = await res.json();
+                raw = (data?.data?.list || []).slice(0, 20);
+            }
+
+            if (raw.length === 0) { logFn(`⚠️ 未搜到歌手 "${keyword}" 的任何歌曲，已熔断`); return []; }
+
+            lxSongsToImport = raw.map((s: any) => { s.quality = resolveQuality(s.types, targetQuality); return s; });
+            logFn(`🎯 成功检索到歌手 [${keyword}] 的 ${lxSongsToImport.length} 首歌曲`);
+        } catch (e) { logFn(`❌ LXMusic 歌手检索异常: ${e}`); return null; }
+
+    } else if (cmdType === 'rank') {
+        let kw = keyword || '热歌榜';
+        logFn(`🏆 匹配排行榜: "${kw}" (首选平台: ${cnPlatform})`);
+
+        const candidates = [platform, 'tx', 'kw', 'kg', 'wy', 'mg'].filter((v, i, a) => a.indexOf(v) === i);
+        let board: any = null;
+        let usedPlat = platform;
+
+        for (const cp of candidates) {
+            try {
+                const bres = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/leaderboard/boards?source_id=${cp}`, { headers });
+                const bdata = await bres.json();
+                const boards = bdata?.data || [];
+                if (boards.length === 0) continue;
+                board = boards.find((b: any) => b.name === kw) ||
+                        boards.find((b: any) => b.name.includes(kw)) ||
+                        boards.find((b: any) => kw.includes(b.name));
+                if (board) { usedPlat = cp; break; }
+            } catch(e) {}
+        }
+
+        if (!board) { logFn(`⚠️ 未在任何平台匹配到排行榜 "${kw}"`); return []; }
+
+        logFn(`🎯 命中排行榜: [${platMap[usedPlat]||usedPlat}] ${board.name}，正在拉取歌曲...`);
+        try {
+            let page = 1;
+            while (true) {
+                const lres = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/leaderboard/list?source_id=${usedPlat}&board_id=${encodeURIComponent(board.bangid)}&page=${page}`, { headers });
+                const ldata = await lres.json();
+                const pageList = ldata?.data?.list || [];
+                if (pageList.length === 0) break;
+                for (const s of pageList) {
+                    s.quality = resolveQuality(s.types, targetQuality);
+                    lxSongsToImport.push(s);
+                }
+                if (lxSongsToImport.length >= 500 || ldata?.data?.has_more === false) break;
+                page++;
+                if (page > 10) break;
+            }
+            logFn(`🎯 成功拉取排行榜 [${board.name}] 共 ${lxSongsToImport.length} 首歌曲`);
+        } catch (e) { logFn(`❌ LXMusic 排行榜接口异常: ${e}`); return null; }
+
+    } else if (cmdType === 'album') {
+        logFn(`💿 开始在 LXMusic [${cnPlatform}] 检索专辑: "${keyword}"`);
+        try {
+            let raw: any[] = [];
+            let isNativeSuccess = false;
+
+            // 🌟 1. 首选：原生 album 接口 (由于一张专辑一般也就十几首歌，翻2页足够)
+            try {
+                let page = 1;
+                while (raw.length < 50 && page <= 2) {
+                    const res = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify({ keyword: keyword, source_id: platform, type: 'album', page: page }) });
+                    const data = await res.json();
+                    const list = data?.data?.list || [];
+                    if (list.length === 0) break;
+                    raw = raw.concat(list);
+                    if (data?.data?.has_more === false) break;
+                    page++;
+                }
+                if (raw.length > 0) isNativeSuccess = true;
+            } catch(e) { logFn(`⚠️ 原生专辑接口异常，准备降级: ${e}`); }
+
+            // 🌟 2. 双保险兜底：降级至 song 泛搜 + 本地聚类清洗
+            if (isNativeSuccess) {
+                logFn(`🎯 原生专辑接口命中，直接采用返回的 ${raw.length} 首歌曲`);
+                lxSongsToImport = raw.map((s: any) => { s.quality = resolveQuality(s.types, targetQuality); return s; });
+            } else {
+                logFn(`⚠️ 专属专辑接口无数据，降级使用单曲泛搜+智能清洗模式(仅取首页20首)...`);
+                const sres = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify({ keyword: keyword, source_id: platform, type: 'song', page: 1 }) });
+                const sdata = await sres.json();
+                raw = (sdata?.data?.list || []).slice(0, 20);
+
+                if (raw.length === 0) { logFn(`⚠️ 未搜到相关结果，已熔断`); return []; }
+
+                // 开始执行本地智能清洗
+                const albumCounts: Record<string, number> = {};
+                for (const s of raw) { const a = (s.album || '').trim(); if (a) albumCounts[a] = (albumCounts[a] || 0) + 1; }
+                let bestAlbum = null, bestAlbumCount = -1;
+                for (const a in albumCounts) { if (albumCounts[a] > bestAlbumCount) { bestAlbumCount = albumCounts[a]; bestAlbum = a; } }
+
+                let kept = bestAlbum ? raw.filter((s:any) => (s.album||'').trim() === bestAlbum) : raw.filter((s:any) => (s.album||'').includes(keyword));
+                if (kept.length === 0) kept = raw;
+
+                const top10 = kept.slice(0, 10);
+                const artistCounts: Record<string, number> = {};
+                for (const s of top10) { const ar = (s.singer || s.artist || '').trim(); if (ar) artistCounts[ar] = (artistCounts[ar] || 0) + 1; }
+                let bestArtist = null, bestArtistCount = -1;
+                for (const ar in artistCounts) { if (artistCounts[ar] > bestArtistCount) { bestArtistCount = artistCounts[ar]; bestArtist = ar; } }
+                if (!bestArtist && top10.length) bestArtist = (top10[0].singer || top10[0].artist || '').trim();
+
+                if (bestArtist) {
+                    kept = kept.filter((s:any) => ((s.singer || s.artist) || '').trim() === bestArtist);
+                    logFn(`💿 降级清洗命中专辑 [${bestAlbum || keyword}] (主歌手: ${bestArtist})`);
+                }
+
+                lxSongsToImport = kept.map((s: any) => { s.quality = resolveQuality(s.types, targetQuality); return s; });
+                logFn(`🎯 成功清洗并锁定专辑共 ${lxSongsToImport.length} 首歌曲`);
+            }
+        } catch (e) { logFn(`❌ LXMusic 专辑检索异常: ${e}`); return null; }
     }
 
-    // 纯粹返回歌曲数组，交由 main.ts 统管处理
     return lxSongsToImport;
 }
