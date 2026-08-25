@@ -341,47 +341,58 @@
         </div>
       </div>
 
-      <!-- 👇 🌟 新增的高阶 NLP 胶囊设置区块 -->
+      <!-- 👇 🌟 高阶 NLP 胶囊设置区块 -->
       <div class="card" style="margin-top: 12px;">
         <div class="card-title" style="margin-bottom: 12px;">🗣️ 语音高阶词汇定制 (NLP)</div>
 
+        <!-- 🌟 1. 乱序洗牌区块改造 -->
         <div class="mh-field">
-          <label style="font-weight: bold; color: var(--md-on-surface);">获取到的歌曲乱序洗牌</label>
-          <div id="nlp-tags-shuffle" class="mh-tag-container"></div>
-          <div style="display: flex; gap: 12px; align-items: center;">
-            <input type="text" id="nlp-input-shuffle" class="mh-input" placeholder="输入词汇，如：随便放">
-            <button class="mh-btn" id="nlp-btn-add-shuffle">➕ 添加</button>
+          <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 8px;">获取到的歌曲乱序洗牌 (默认不打乱)</label>
+          <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
+            <div id="nlp-tags-shuffle" class="mh-tag-container" style="flex: 1; margin-bottom: 0; transition: opacity 0.2s;"></div>
+            <input type="checkbox" id="nlp-enable-shuffle" class="mh-switch-input" checked style="margin-top: 4px; flex-shrink: 0;" title="启用/停用乱序词汇">
           </div>
-          <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">只要句子里包含这些词，获取到的歌曲列表就会被打乱。(默认不打乱)</div>
+          <div id="nlp-input-area-shuffle" style="display: flex; gap: 12px; align-items: center; transition: opacity 0.2s;">
+            <input type="text" id="nlp-input-shuffle" class="mh-input" placeholder="输入词汇，如：随便放">
+            <button class="mh-btn" id="nlp-btn-add-shuffle">➕ 口令</button>
+          </div>
+          <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">句子里包含这些词，获取到的歌曲列表就会被打乱。例如“随机搜索歌单80后”</div>
         </div>
 
         <div class="mh-divider" style="box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08); opacity: 0.7;"></div>
 
         <div class="mh-field">
-          <label style="font-weight: bold; color: var(--md-on-surface);">获取数量口令限定 (默认/最大首数)</label>
+          <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 8px;">获取数量口令限定 (默认/最大首数)</label>
           <input type="number" id="global-default-limit" class="mh-input" placeholder="例如：500" value="500">
           <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">如果语音指令未指定具体数量，默认获取数量不超过该值。</div>
         </div>
 
+        <!-- 🌟 2. 数量截取前后缀区块改造-->
         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
             <div class="mh-field" style="flex: 1; min-width: 150px; margin-bottom: 0;">
-              <label style="font-weight: bold; color: var(--md-on-surface);">数量截取前缀(非必须)</label>
-              <div id="nlp-tags-prefix" class="mh-tag-container"></div>
-              <div style="display: flex; gap: 12px; align-items: center;">
+              <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 8px;">数量截取前缀(非必须)</label>
+              <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px;">
+                <div id="nlp-tags-prefix" class="mh-tag-container" style="flex: 1; margin-bottom: 0; transition: opacity 0.2s;"></div>
+              </div>
+              <div id="nlp-input-area-prefix" style="display: flex; gap: 12px; align-items: center; transition: opacity 0.2s;">
                 <input type="text" id="nlp-input-prefix" class="mh-input" placeholder="输入词汇，如：只听">
-                <button class="mh-btn" id="nlp-btn-add-prefix">➕ 添加</button>
+                <button class="mh-btn" id="nlp-btn-add-prefix">➕ 口令</button>
               </div>
             </div>
+
             <div class="mh-field" style="flex: 1; min-width: 150px; margin-bottom: 0;">
-              <label style="font-weight: bold; color: var(--md-on-surface);">数量截取后缀</label>
-              <div id="nlp-tags-suffix" class="mh-tag-container"></div>
-              <div style="display: flex; gap: 12px; align-items: center;">
+              <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 8px;">数量截取后缀</label>
+              <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
+                <div id="nlp-tags-suffix" class="mh-tag-container" style="flex: 1; margin-bottom: 0; transition: opacity 0.2s;"></div>
+                <input type="checkbox" id="nlp-enable-limit" class="mh-switch-input" checked style="margin-top: 4px; flex-shrink: 0;" title="启用/停用数量截取">
+              </div>
+              <div id="nlp-input-area-suffix" style="display: flex; gap: 12px; align-items: center; transition: opacity 0.2s;">
                 <input type="text" id="nlp-input-suffix" class="mh-input" placeholder="输入词汇，如：曲">
-                <button class="mh-btn" id="nlp-btn-add-suffix">➕ 添加</button>
+                <button class="mh-btn" id="nlp-btn-add-suffix">➕ 口令</button>
               </div>
             </div>
         </div>
-        <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 8px;">识别规则：[前缀] + 数字 + [后缀]。该口令必须放在最后。例如“网盘歌单伍佰前20首”。前缀是可选的。“网盘歌单伍佰20首”系统也能懂</div>
+        <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 8px;">识别规则：[前缀] + 数字 + [后缀]，前缀为可选。该口令可放在句首或句尾。例如“前20首网盘歌单伍佰”或“网盘歌单伍佰20首”。</div>
       </div>
     </div>
 
@@ -396,7 +407,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.6.0</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.6.1</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -450,17 +461,20 @@
       <div class="card">
         <div style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
           <div class="card-title" style="margin: 0;">🎙️ 小爱口令设置</div>
-          <button class="mh-btn" id="btn-show-add-lx-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增口令</button>
+          <button class="mh-btn" id="btn-show-add-lx-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增控制条目</button>
         </div>
 
         <div id="lx-cmd-modal-mask" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.4); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
           <div class="modal-box">
-            <div class="card-title" style="margin-bottom: 16px;">➕ 新增口令</div>
+            <div class="card-title" id="lx-cmd-modal-title" style="margin-bottom: 16px;">➕ 新增控制条目</div>
             <div class="mh-field">
-              <label>口令功能类型</label>
+              <label>功能类型</label>
               <select id="modal-lx-cmd-type" class="mh-select">
-                <option value="play">搜索歌单并播放</option>
-                <option value="search">搜索单曲并播放</option>
+                <option value="play">搜索歌单</option>
+                <option value="search">搜索单曲</option>
+                <option value="singer">搜索歌手</option>
+                <option value="album">搜索专辑</option>
+                <option value="rank">搜索榜单</option>
               </select>
             </div>
             <div class="mh-field">
@@ -481,9 +495,25 @@
                 <option value="first">默认第一个</option><option value="random">随机抽取</option><option value="play_count">热度优先 (最多播放)</option><option value="total">数量优先 (最多曲目)</option>
               </select>
             </div>
-            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
-              <button class="mh-btn" id="btn-lx-cmd-cancel">❌ 取消</button>
-              <button class="mh-btn" id="btn-lx-cmd-confirm">✅ 确认创建</button>
+            <div class="mh-field">
+              <label>截取多少首 (留空则使用全局默认)</label>
+              <input type="number" id="modal-lx-cmd-limit" class="mh-input" placeholder="例如：20">
+            </div>
+            <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="margin-bottom: 0;">获取歌曲后乱序</label>
+              <input type="checkbox" id="modal-lx-cmd-shuffle" class="mh-switch-input">
+            </div>
+
+            <div style="display: flex; align-items: center; margin-top: 20px; width: 100%;">
+              <div style="flex: 1; display: flex; justify-content: flex-start;">
+                <button class="mh-btn mh-btn-danger" id="btn-lx-cmd-delete" style="display: none;">🗑️ 删除</button>
+              </div>
+              <div style="flex: 1; display: flex; justify-content: center;">
+                <button class="mh-btn" id="btn-lx-cmd-cancel">❌ 取消</button>
+              </div>
+              <div style="flex: 1; display: flex; justify-content: flex-end;">
+                <button class="mh-btn" id="btn-lx-cmd-confirm">✅ 创建</button>
+              </div>
             </div>
           </div>
         </div>
@@ -533,26 +563,42 @@
       <div class="card">
         <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
           <span>🎙️ 小爱口令设置</span>
-          <button class="mh-btn" id="btn-show-add-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增口令</button>
+          <button class="mh-btn" id="btn-show-add-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增控制条目</button>
         </div>
 
         <div id="cmd-modal-mask" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.4); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
           <div class="modal-box">
-            <div class="card-title" style="margin-bottom: 16px;">➕ 新增口令</div>
+            <div class="card-title" id="cmd-modal-title" style="margin-bottom: 16px;">➕ 新增控制条目</div>
             <div class="mh-field">
-              <label>口令功能类型</label>
+              <label>功能类型</label>
               <select id="modal-cmd-type" class="mh-select">
                 <option value="play">播放 WebDAV 歌单口令</option>
                 <option value="search">播放 WebDAV 歌曲口令</option>
               </select>
             </div>
-            <div class="mh-field" style="margin-bottom: 20px;">
+            <div class="mh-field">
               <label>关联 WebDAV 节点</label>
               <select id="modal-cmd-node" class="mh-select"></select>
             </div>
-            <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: center;">
-              <button class="mh-btn" id="btn-cmd-cancel">❌ 取消</button>
-              <button class="mh-btn" id="btn-cmd-confirm">✅ 确认创建</button>
+            <div class="mh-field">
+              <label>截取多少首 (留空则使用全局默认)</label>
+              <input type="number" id="modal-cmd-limit" class="mh-input" placeholder="例如：20">
+            </div>
+            <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="margin-bottom: 0;">获取歌曲后乱序</label>
+              <input type="checkbox" id="modal-cmd-shuffle" class="mh-switch-input">
+            </div>
+
+            <div style="display: flex; align-items: center; margin-top: 20px; width: 100%;">
+              <div style="flex: 1; display: flex; justify-content: flex-start;">
+                <button class="mh-btn mh-btn-danger" id="btn-cmd-delete" style="display: none;">🗑️ 删除</button>
+              </div>
+              <div style="flex: 1; display: flex; justify-content: center;">
+                <button class="mh-btn" id="btn-cmd-cancel">❌ 取消</button>
+              </div>
+              <div style="flex: 1; display: flex; justify-content: flex-end;">
+                <button class="mh-btn" id="btn-cmd-confirm">✅ 创建</button>
+              </div>
             </div>
           </div>
         </div>
@@ -720,7 +766,7 @@
      ========================================== */
   const DEF_SHUFFLE = ['随机', '乱序'];
   const DEF_PREFIX = ['前', '截取'];
-  const DEF_SUFFIX = ['首', '首歌', '首音乐'];
+  const DEF_SUFFIX = ['首', '首歌'];
   const DEF_LIMIT = 500;
 
   // 初始变量赋值，使用常量拷贝
@@ -736,6 +782,12 @@
       if (!container) return;
 
       container.innerHTML = '';
+      // 统一的口令为空提示
+      if (arr.length === 0) {
+          container.innerHTML = `<span style="color: var(--md-error); font-size: 13px; display: inline-flex; align-items: center; height: 28px; font-weight: 500;">⚠️ 请增加口令</span>`;
+          return;
+      }
+
       arr.forEach((word, idx) => {
           const tag = document.createElement('div');
           tag.className = 'mh-tag';
@@ -747,6 +799,30 @@
           });
           container.appendChild(tag);
       });
+  }
+
+  function updateNlpUiState() {
+      const sTog = document.getElementById('nlp-enable-shuffle');
+      if (sTog) {
+          const els = ['nlp-tags-shuffle', 'nlp-input-area-shuffle'].map(id => document.getElementById(id));
+          els.forEach(el => {
+              if (el) {
+                  el.style.opacity = sTog.checked ? '1' : '0.4';
+                  el.style.pointerEvents = sTog.checked ? 'auto' : 'none';
+              }
+          });
+      }
+
+      const lTog = document.getElementById('nlp-enable-limit');
+      if (lTog) {
+          const els = ['nlp-tags-prefix', 'nlp-input-area-prefix', 'nlp-tags-suffix', 'nlp-input-area-suffix'].map(id => document.getElementById(id));
+          els.forEach(el => {
+              if (el) {
+                  el.style.opacity = lTog.checked ? '1' : '0.4';
+                  el.style.pointerEvents = lTog.checked ? 'auto' : 'none';
+              }
+          });
+      }
   }
 
   function addNlpWord(type) {
@@ -773,13 +849,21 @@
     const hitSound = document.getElementById('global-hit-sound')?.value || '';
 
     const defaultLimit = parseInt(document.getElementById('global-default-limit')?.value, 10) || 500;
+
+    // 🌟 新增：抓取界面上两个开关的状态
+    const enableShuffle = document.getElementById('nlp-enable-shuffle')?.checked !== false;
+    const enableLimit = document.getElementById('nlp-enable-limit')?.checked !== false;
+
+    // 🌟 新增：将开关状态打包进 payload
     const payload = {
         targetPlaylist,
         hitSound,
         shuffleWords: nlpShuffleWords,
         limitPrefixes: nlpLimitPrefixes,
         limitSuffixes: nlpLimitSuffixes,
-        defaultLimit
+        defaultLimit,
+        enableShuffle,
+        enableLimit
     };
 
     try {
@@ -838,6 +922,16 @@
               needSave = true;
           }
 
+          // 🌟 5. 新增：检查并兜底注入开关状态 (默认都是 true 开启)
+          if (typeof parsed.enableShuffle !== 'boolean') {
+              parsed.enableShuffle = true;
+              needSave = true;
+          }
+          if (typeof parsed.enableLimit !== 'boolean') {
+              parsed.enableLimit = true;
+              needSave = true;
+          }
+
           // 如果发现有任何缺失（首次安装），则把完整版对象重新存入数据库
           if (needSave) {
               parsed.targetPlaylist = parsed.targetPlaylist || 'iWebPlayer推送';
@@ -878,6 +972,10 @@
     // 2. 前置语音提示音 -> 绑定 change 事件
     document.getElementById('global-hit-sound')?.addEventListener('change', saveGlobalSettings);
     document.getElementById('global-default-limit')?.addEventListener('change', saveGlobalSettings);
+
+    // 🌟 新增：绑定 UI 开关点击事件，触发透明度更新和数据保存
+    document.getElementById('nlp-enable-shuffle')?.addEventListener('change', () => { updateNlpUiState(); saveGlobalSettings(); });
+    document.getElementById('nlp-enable-limit')?.addEventListener('change', () => { updateNlpUiState(); saveGlobalSettings(); });
 
     // 3. 标签栏横向滚动与悬浮箭头控制
     const tabsEl = document.getElementById('mh-tabs-scroll');
@@ -1116,6 +1214,16 @@
 
       const limitInput = document.getElementById('global-default-limit');
       if (limitInput) limitInput.value = savedSettings.defaultLimit || 500;
+
+      // 🌟 拉取数据后，恢复开关的勾选状态
+      const shufToggle = document.getElementById('nlp-enable-shuffle');
+      if (shufToggle) shufToggle.checked = savedSettings.enableShuffle !== false;
+
+      const limitToggle = document.getElementById('nlp-enable-limit');
+      if (limitToggle) limitToggle.checked = savedSettings.enableLimit !== false;
+
+      // 🌟 根据开关状态，更新一次下方面板的变灰/高亮状态
+      if (typeof updateNlpUiState === 'function') updateNlpUiState();
 
       // 2. 拉取系统歌单数据并增补歌单下拉框
       try {

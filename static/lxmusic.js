@@ -29,14 +29,32 @@
         } catch(e) {}
       }
 
-      // 如果全网第一次运行（后端的注入可能比前端慢了几毫秒），前端也做一次主动回退保护
+      // 🌟 定义 5 大默认指令 (保留原有，补充新增)
+      const defaultLx = [
+          { engine: 'lxmusic', type: 'play', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌单'] },
+          { engine: 'lxmusic', type: 'search', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌曲'] },
+          { engine: 'lxmusic', type: 'singer', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌手'] },
+          { engine: 'lxmusic', type: 'album', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索专辑'] },
+          { engine: 'lxmusic', type: 'rank', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索榜单'] }
+
+      ];
+
+      // 🌟 首次安装 或 升级查漏补缺
       if (lxCmdConfigs.length === 0) {
-          lxCmdConfigs = [
-              { engine: 'lxmusic', type: 'play', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌单'] },
-              { engine: 'lxmusic', type: 'search', node: 'default', quality: '320k', strategy: 'first', isDefault: true, cmds: ['搜索歌曲'] }
-          ];
+          lxCmdConfigs = [...defaultLx];
           await autoSaveLxCmds();
+      } else {
+          let added = false;
+          // 遍历 5 个默认指令，如果当前用户的配置里缺了某个类型，就自动补进去
+          defaultLx.forEach(d => {
+              if (!lxCmdConfigs.find(c => c.isDefault && c.type === d.type && c.engine === d.engine)) {
+                  lxCmdConfigs.push(d);
+                  added = true;
+              }
+          });
+          if (added) await autoSaveLxCmds();
       }
+
       renderLxCmdContainers();
     }).catch(e => console.warn("加载 LXMusic 口令失败:", e));
   }
@@ -53,7 +71,9 @@
 
       const platMap = { wy: '网易云音乐', tx: 'QQ音乐', kg: '酷狗音乐', kw: '酷我音乐', mg: '咪咕音乐' };
       const stratMap = { first: '默认首个', random: '随机挑选', play_count: '热度优先', total: '数量优先' };
-      const typeName = cfg.type === 'play' ? '歌单' : '歌曲';
+      // 🌟 修改：精准映射所有类型
+      const typeNameMap = { play: '歌单', search: '歌曲', singer: '歌手', album: '专辑', rank: '榜单' };
+      const typeName = typeNameMap[cfg.type] || '歌曲';
 
       let labelText = ''; let badgeHtml = '';
 
@@ -61,32 +81,66 @@
           labelText = `搜索 LXMusic ${typeName}口令(默认配置)`;
       } else {
           const platName = platMap[cfg.node] || cfg.node;
-          labelText = `[定制] 搜${platName}${typeName}`;
-          badgeHtml = `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 6px; font-weight: normal; color: var(--md-on-surface-variant);">音质: ${cfg.quality || '320k'}</span>`;
-          if (cfg.type === 'play') badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 6px; font-weight: normal; color: var(--md-on-surface-variant);">策略: ${stratMap[cfg.strategy] || '默认'}</span>`;
+          labelText = `搜${platName}${typeName}`; // 去掉了 [定制]
+
+          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center;">`;
+          badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">音质: ${cfg.quality || '320k'}</span>`;
+          if (cfg.type === 'play') badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">策略: ${stratMap[cfg.strategy] || '默认'}</span>`;
+          if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
+          if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">乱序: 开启</span>`;
+          badgeHtml += `</div>`;
       }
 
-      let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap;">
+      let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
         <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">${labelText}</label>
         ${badgeHtml}`;
 
       if (!cfg.isDefault) {
-          titleHtml += `<button class="mh-btn mh-btn-danger" style="height: 24px; padding: 0 8px; font-size: 12px;" onclick="window._deleteLxCmdGroup('${cfg.type}', '${cfg.node}')">🗑️ 删除此组</button>`;
+          titleHtml += `<button class="mh-btn" style="height: 24px; padding: 0 10px; font-size: 12px; border-color: var(--md-outline); color: var(--md-on-surface-variant);" onclick="window._editLxCmdGroup('${cfg.type}', '${cfg.node}')">✏️ 编辑</button>`;
       }
       titleHtml += `</div>`;
 
+      const isEnabled = cfg.enabled !== false;
+
       box.innerHTML = `
         ${titleHtml}
-        <div id="lx-tags-${mapKey}" class="mh-tag-container"></div>
-        <div style="display: flex; gap: 12px; align-items: center;">
+        <!-- 👇 将口令胶囊容器和开关放在同一个 flex 行内，开关居右 -->
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
+          <div id="lx-tags-${mapKey}" class="mh-tag-container" style="flex: 1; margin-bottom: 0; transition: opacity 0.2s;"></div>
+          <input type="checkbox" id="lx-enable-${mapKey}" class="mh-switch-input" ${isEnabled ? 'checked' : ''} style="margin-top: 2px; flex-shrink: 0;" title="启用/停用此组">
+        </div>
+        <!-- 👇 输入框和添加按钮单独在下面一行 -->
+        <div id="lx-input-area-${mapKey}" style="display: flex; gap: 12px; align-items: center; transition: opacity 0.2s;">
           <input type="text" id="lx-input-${mapKey}" class="mh-input" placeholder="输入口令，如：全网${typeName}">
-          <button class="mh-btn" id="lx-btn-add-${mapKey}">➕ 添加</button>
+          <button class="mh-btn" id="lx-btn-add-${mapKey}">➕ 口令</button>
         </div>
       `;
 
       mainContainer.appendChild(box);
       document.getElementById(`lx-btn-add-${mapKey}`).addEventListener('click', () => addLxCmd(cfg.type, cfg.node));
       document.getElementById(`lx-input-${mapKey}`).addEventListener('keypress', (e) => { if (e.key === 'Enter') addLxCmd(cfg.type, cfg.node); });
+
+      // 获取当前项的开关、标签容器和输入框区域
+      const toggleEl = document.getElementById(`lx-enable-${mapKey}`);
+      const tagsEl = document.getElementById(`lx-tags-${mapKey}`);
+      const inputArea = document.getElementById(`lx-input-area-${mapKey}`);
+
+      const updateUiState = (enabled) => {
+          const opacity = enabled ? '1' : '0.4';
+          const ptrEvents = enabled ? 'auto' : 'none';
+          // 开关已经在外面了，现在可以直接让整个胶囊区和输入区变灰禁用
+          if (tagsEl) { tagsEl.style.opacity = opacity; tagsEl.style.pointerEvents = ptrEvents; }
+          if (inputArea) { inputArea.style.opacity = opacity; inputArea.style.pointerEvents = ptrEvents; }
+      };
+
+      // 初始渲染时置灰
+      updateUiState(cfg.enabled !== false);
+
+      toggleEl?.addEventListener('change', async (e) => {
+          cfg.enabled = e.target.checked;
+          updateUiState(cfg.enabled);
+          await autoSaveLxCmds();
+      });
 
       renderLxTags(cfg.type, cfg.node);
     });
@@ -101,6 +155,12 @@
     const arr = (cfg && cfg.cmds) ? cfg.cmds : [];
 
     container.innerHTML = '';
+    // 统一的口令为空提示
+    if (arr.length === 0) {
+        container.innerHTML = `<span style="color: var(--md-error); font-size: 13px; display: inline-flex; align-items: center; height: 28px; font-weight: 500;">⚠️ 请增加口令</span>`;
+        return;
+    }
+
     arr.forEach((cmd, idx) => {
       const tag = document.createElement('div');
       tag.className = 'mh-tag';
@@ -134,13 +194,6 @@
     inputEl.value = '';
     renderLxTags(type, node); autoSaveLxCmds();
   }
-
-  window._deleteLxCmdGroup = async function(type, node) {
-    if (!confirm(`确定删除该配置组吗？（删除后该配置下的口令也将一并清除）`)) return;
-    lxCmdConfigs = lxCmdConfigs.filter(c => !(c.type === type && c.node === node));
-    await autoSaveLxCmds();
-    renderLxCmdContainers();
-  };
 
   // ==========================================
   // 模块 B：全局默认偏好管理 (统一 lxmusic_config)
@@ -337,30 +390,113 @@
       const stratField = document.getElementById('lx-strategy-field');
 
       modalType?.addEventListener('change', (e) => {
-          if (e.target.value === 'search') stratField.style.display = 'none';
-          else stratField.style.display = 'block';
+          if (e.target.value === 'play') {
+              stratField.style.display = 'block';
+          } else {
+              stratField.style.display = 'none';
+          }
       });
 
+      let currentEditMode = null;
+
+      // 1. 点击“新增控制条目”时：进入【新增模式】
       document.getElementById('btn-show-add-lx-cmd')?.addEventListener('click', () => {
+          currentEditMode = null;
+          // UI 初始化
+          document.getElementById('lx-cmd-modal-title').innerText = '➕ 新增控制条目';
+          document.getElementById('btn-lx-cmd-confirm').innerText = '✅ 创建';
+          document.getElementById('btn-lx-cmd-delete').style.display = 'none'; // 隐藏删除按钮
+
+          const limitEl = document.getElementById('modal-lx-cmd-limit');
+          if (limitEl) limitEl.value = '';
+          const shuffleEl = document.getElementById('modal-lx-cmd-shuffle');
+          if (shuffleEl) shuffleEl.checked = false;
+
+          document.getElementById('modal-lx-cmd-type').value = 'play';
+          document.getElementById('modal-lx-cmd-node').value = 'wy';
+          document.getElementById('modal-lx-cmd-quality').value = '320k';
+          document.getElementById('modal-lx-cmd-strategy').value = 'first';
+          document.getElementById('modal-lx-cmd-type').dispatchEvent(new Event('change'));
+
           const mask = document.getElementById('lx-cmd-modal-mask');
           if (mask) mask.style.display = 'flex';
       });
 
+      // 2. 点击列表里的“编辑”时：进入【编辑模式】并回显数据
+      window._editLxCmdGroup = function(type, node) {
+          const cfg = lxCmdConfigs.find(c => c.type === type && c.node === node);
+          if (!cfg) return;
+          currentEditMode = { type, node }; // 记录靶向靶标
+
+          // UI 初始化
+          document.getElementById('lx-cmd-modal-title').innerText = '✏️ 编辑控制条目';
+          document.getElementById('btn-lx-cmd-confirm').innerText = '✅ 修改';
+          document.getElementById('btn-lx-cmd-delete').style.display = 'inline-flex'; // 显示删除按钮
+
+          // 核心：回显数据到表单
+          document.getElementById('modal-lx-cmd-type').value = cfg.type || 'play';
+          document.getElementById('modal-lx-cmd-node').value = cfg.node || 'wy';
+          document.getElementById('modal-lx-cmd-quality').value = cfg.quality || '320k';
+          document.getElementById('modal-lx-cmd-strategy').value = cfg.strategy || 'first';
+          document.getElementById('modal-lx-cmd-limit').value = cfg.limit || '';
+          document.getElementById('modal-lx-cmd-shuffle').checked = !!cfg.shuffle;
+
+          // 触发一次 change 事件以联动显示/隐藏策略框
+          document.getElementById('modal-lx-cmd-type').dispatchEvent(new Event('change'));
+
+          const mask = document.getElementById('lx-cmd-modal-mask');
+          if (mask) mask.style.display = 'flex';
+      };
+
+      // 3. 弹窗关闭与取消
       const hideModal = () => { document.getElementById('lx-cmd-modal-mask').style.display = 'none'; };
       document.getElementById('btn-lx-cmd-cancel')?.addEventListener('click', hideModal);
       document.getElementById('lx-cmd-modal-mask')?.addEventListener('click', (e) => { if (e.target.id === 'lx-cmd-modal-mask') hideModal(); });
 
+      // 4. 处理弹窗内的【删除】
+      document.getElementById('btn-lx-cmd-delete')?.addEventListener('click', async () => {
+          if (!currentEditMode) return;
+          if (!confirm('确定彻底删除该配置组吗？（包含其中的所有口令词将一并清除）')) return;
+
+          lxCmdConfigs = lxCmdConfigs.filter(c => !(c.type === currentEditMode.type && c.node === currentEditMode.node));
+          await autoSaveLxCmds();
+          hideModal();
+          renderLxCmdContainers();
+      });
+
+      // 5. 处理弹窗内的【确认】（根据状态自动分流：新增 or 更新）
       document.getElementById('btn-lx-cmd-confirm')?.addEventListener('click', async () => {
         const type = document.getElementById('modal-lx-cmd-type').value;
         const node = document.getElementById('modal-lx-cmd-node').value;
         const quality = document.getElementById('modal-lx-cmd-quality').value;
         const strategy = document.getElementById('modal-lx-cmd-strategy').value;
 
-        if (lxCmdConfigs.find(c => c.type === type && c.node === node && !c.isDefault)) {
-            return alert('⚠️ 该平台的类型已存在，请直接在下方添加口令');
+        const limitStr = document.getElementById('modal-lx-cmd-limit').value;
+        const limit = limitStr ? parseInt(limitStr, 10) : '';
+        const shuffle = document.getElementById('modal-lx-cmd-shuffle').checked;
+
+        if (currentEditMode) {
+            // == 编辑模式 ==
+            // 拦截：如果用户把平台或类型改成了另一个已经存在的项（防冲突）
+            if ((type !== currentEditMode.type || node !== currentEditMode.node) &&
+                lxCmdConfigs.find(c => c.type === type && c.node === node && !c.isDefault)) {
+                return alert('⚠️ 目标平台的该类型配置已存在，无法修改为该类型，请换一个');
+            }
+
+            // 找到原靶标进行数据覆盖更新
+            const cfg = lxCmdConfigs.find(c => c.type === currentEditMode.type && c.node === currentEditMode.node);
+            if (cfg) {
+                cfg.type = type; cfg.node = node; cfg.quality = quality;
+                cfg.strategy = strategy; cfg.limit = limit; cfg.shuffle = shuffle;
+            }
+        } else {
+            // == 新增模式 ==
+            if (lxCmdConfigs.find(c => c.type === type && c.node === node && !c.isDefault)) {
+                return alert('⚠️ 该平台的类型已存在，请直接在列表中点“编辑”修改');
+            }
+            lxCmdConfigs.push({ engine: 'lxmusic', type, node, quality, strategy, limit, shuffle, enabled: true, isDefault: false, cmds: [] });
         }
 
-        lxCmdConfigs.push({ engine: 'lxmusic', type, node, quality, strategy, isDefault: false, cmds: [] });
         await autoSaveLxCmds();
         hideModal(); renderLxCmdContainers();
       });

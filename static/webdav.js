@@ -54,21 +54,36 @@
       const box = document.createElement('div');
       box.className = 'mh-field'; box.id = containerId;
 
-      let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 6px;">
-        <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">${cfg.label}</label>`;
+      let badgeHtml = '';
+      if (!isDefault && (cfg.limit || cfg.shuffle)) {
+          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center;">`;
+          if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
+          if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">乱序: 开启</span>`;
+          badgeHtml += `</div>`;
+      }
+
+      let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+        <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">${cfg.label}</label>
+        ${badgeHtml}`;
+
       if (!isDefault) {
-        titleHtml += `<button class="mh-btn mh-btn-danger" style="height: 24px; padding: 0 8px; font-size: 12px;" onclick="window._deleteCmdGroup('${cfg.type}', '${cfg.node}')">🗑️ 删除此组</button>`;
+        titleHtml += `<button class="mh-btn" style="height: 24px; padding: 0 10px; font-size: 12px; border-color: var(--md-outline); color: var(--md-on-surface-variant);" onclick="window._editCmdGroup('${cfg.type}', '${cfg.node}')">✏️ 编辑</button>`;
       }
       titleHtml += `</div>`;
 
       const placeholderText = cfg.type === 'play' ? '输入口令，如：网盘歌单' : '输入口令，如：网盘歌曲';
+      const isEnabled = cfg.enabled !== false; // 默认启用
 
+      // 🌟 引入带开关的双行结构，按钮改名“➕ 口令”
       box.innerHTML = `
         ${titleHtml}
-        <div id="tags-${mapKey}" class="mh-tag-container"></div>
-        <div style="display: flex; gap: 12px; align-items: center;">
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
+          <div id="tags-${mapKey}" class="mh-tag-container" style="flex: 1; margin-bottom: 0; transition: opacity 0.2s;"></div>
+          <input type="checkbox" id="enable-${mapKey}" class="mh-switch-input" ${isEnabled ? 'checked' : ''} style="margin-top: 4px; flex-shrink: 0;" title="启用/停用此组">
+        </div>
+        <div id="input-area-${mapKey}" style="display: flex; gap: 12px; align-items: center; transition: opacity 0.2s;">
           <input type="text" id="input-${mapKey}" class="mh-input" placeholder="${placeholderText}">
-          <button class="mh-btn" id="btn-add-${mapKey}">➕ 添加</button>
+          <button class="mh-btn" id="btn-add-${mapKey}">➕ 口令</button>
         </div>
       `;
 
@@ -78,6 +93,27 @@
       document.getElementById(`input-${mapKey}`).addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addVoiceCmd(cfg.type, cfg.node);
       });
+
+      // 🌟 绑定开关置灰与保存逻辑
+      const toggleEl = document.getElementById(`enable-${mapKey}`);
+      const tagsEl = document.getElementById(`tags-${mapKey}`);
+      const inputArea = document.getElementById(`input-area-${mapKey}`);
+
+      const updateUiState = (enabled) => {
+          const opacity = enabled ? '1' : '0.4';
+          const ptrEvents = enabled ? 'auto' : 'none';
+          if (tagsEl) { tagsEl.style.opacity = opacity; tagsEl.style.pointerEvents = ptrEvents; }
+          if (inputArea) { inputArea.style.opacity = opacity; inputArea.style.pointerEvents = ptrEvents; }
+      };
+
+      updateUiState(cfg.enabled !== false);
+
+      toggleEl?.addEventListener('change', async (e) => {
+          cfg.enabled = e.target.checked;
+          updateUiState(cfg.enabled);
+          await autoSaveVoiceCmds();
+      });
+
       renderTags(cfg.type, cfg.node);
     });
   }
@@ -91,6 +127,12 @@
     const arr = (cfg && cfg.cmds) ? cfg.cmds : [];
 
     container.innerHTML = '';
+    // 统一的口令为空提示
+    if (arr.length === 0) {
+        container.innerHTML = `<span style="color: var(--md-error); font-size: 13px; display: inline-flex; align-items: center; height: 28px; font-weight: 500;">⚠️ 请增加口令</span>`;
+        return;
+    }
+
     arr.forEach((cmd, idx) => {
       const tag = document.createElement('div');
       tag.className = 'mh-tag';
@@ -125,21 +167,17 @@
     renderTags(type, node); autoSaveVoiceCmds();
   }
 
-  window._deleteCmdGroup = async function(type, node) {
-    if (!confirm(`确定删除该口令配置组吗？`)) return;
-    cmdConfigs = cmdConfigs.filter(c => !(c.type === type && c.node === node));
-    await autoSaveVoiceCmds();
-    renderAllCmdContainers();
-  };
-
-  // ========== UI 弹窗与控制 ==========
+  // ========== UI 弹窗状态机与控制 ==========
   function getHeaders() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken() }; }
 
-  function showCmdModal() {
+  let currentWdEditMode = null;
+
+  function showCmdModal(editMode = null) {
     const mask = document.getElementById('cmd-modal-mask');
     const nodeSelect = document.getElementById('modal-cmd-node');
     if (!mask || !nodeSelect) return;
 
+    // 填充节点下拉框
     nodeSelect.innerHTML = '';
     if (currentDavServers.length === 0) {
       nodeSelect.innerHTML = '<option value="">暂无可关联节点，请先添加</option>';
@@ -151,6 +189,36 @@
         nodeSelect.appendChild(opt);
       });
     }
+
+    currentWdEditMode = editMode;
+
+    const limitEl = document.getElementById('modal-cmd-limit');
+    const shuffleEl = document.getElementById('modal-cmd-shuffle');
+
+    if (editMode) {
+        // 编辑模式回显
+        document.getElementById('cmd-modal-title').innerText = '✏️ 编辑控制条目';
+        document.getElementById('btn-cmd-confirm').innerText = '✅ 修改';
+        document.getElementById('btn-cmd-delete').style.display = 'inline-flex';
+
+        document.getElementById('modal-cmd-type').value = editMode.type;
+        document.getElementById('modal-cmd-node').value = editMode.node;
+
+        // 新增回显
+        if (limitEl) limitEl.value = editMode.limit || '';
+        if (shuffleEl) shuffleEl.checked = !!editMode.shuffle;
+    } else {
+        // 新增模式
+        document.getElementById('cmd-modal-title').innerText = '➕ 新增控制条目';
+        document.getElementById('btn-cmd-confirm').innerText = '✅ 创建';
+        document.getElementById('btn-cmd-delete').style.display = 'none';
+
+        document.getElementById('modal-cmd-type').value = 'play';
+
+        if (limitEl) limitEl.value = '';
+        if (shuffleEl) shuffleEl.checked = false;
+    }
+
     mask.style.display = 'flex';
   }
 
@@ -159,20 +227,45 @@
     if (mask) mask.style.display = 'none';
   }
 
-  async function handleConfirmAddCmd() {
+  window._editCmdGroup = function(type, node) {
+      const cfg = cmdConfigs.find(c => c.type === type && c.node === node);
+      if (!cfg) return;
+      showCmdModal(cfg);
+  };
+
+  async function handleConfirmCmd() {
     const type = document.getElementById('modal-cmd-type').value;
     const node = document.getElementById('modal-cmd-node').value;
     if (!node) return alert('请先选择有效的 WebDAV 节点');
 
-    if (cmdConfigs.find(c => c.type === type && c.node === node)) {
-      alert('⚠️ 该节点类型配置已存在'); return hideCmdModal();
-    }
+    const limitStr = document.getElementById('modal-cmd-limit').value;
+    const limit = limitStr ? parseInt(limitStr, 10) : '';
+    const shuffle = document.getElementById('modal-cmd-shuffle').checked;
 
-    const typeText = type === 'play' ? '播放 WebDAV 歌单口令' : '播放 WebDAV 歌曲口令';
-    cmdConfigs.push({ type, node, label: `${typeText}(${node})`, isDefault: false, cmds: [] });
+    if (currentWdEditMode) {
+        const cfg = cmdConfigs.find(c => c.type === currentWdEditMode.type && c.node === currentWdEditMode.node);
+        if (cfg) {
+            cfg.type = type; cfg.node = node;
+            cfg.label = type === 'play' ? `播放 WebDAV 歌单口令(${node})` : `播放 WebDAV 歌曲口令(${node})`;
+            cfg.limit = limit; cfg.shuffle = shuffle;
+        }
+    } else {
+        const typeText = type === 'play' ? '播放 WebDAV 歌单口令' : '播放 WebDAV 歌曲口令';
+        cmdConfigs.push({ type, node, label: `${typeText}(${node})`, enabled: true, isDefault: false, cmds: [], limit, shuffle });
+    }
 
     await autoSaveVoiceCmds();
     hideCmdModal(); renderAllCmdContainers();
+  }
+
+  async function handleDeleteCmd() {
+      if (!currentWdEditMode) return;
+      if (!confirm('确定彻底删除该口令配置组吗？')) return;
+
+      cmdConfigs = cmdConfigs.filter(c => !(c.type === currentWdEditMode.type && c.node === currentWdEditMode.node));
+      await autoSaveVoiceCmds();
+      hideCmdModal();
+      renderAllCmdContainers();
   }
 
   // ========== 其余 WebDAV 逻辑 ==========
@@ -262,9 +355,21 @@
     await saveWebDavConfig(cfg);
   }
 
-  async function triggerScan() {
-    const davId = document.getElementById('dav-master-select').value;
+  async function triggerScan(eventOrDavId) {
+    // 判断是手动点击(传入事件对象)还是代码全自动调用(传入字符串节点名)
+    const isAuto = typeof eventOrDavId === 'string';
+    const davId = isAuto ? eventOrDavId : document.getElementById('dav-master-select').value;
+
     if (!davId) return alert('请先选择一个节点');
+
+    // 如果是全自动触发的，顺便把上方的下拉框切换到该节点，让用户能直观看到扫描进度
+    if (isAuto) {
+        const masterSelect = document.getElementById('dav-master-select');
+        if (masterSelect.value !== davId) {
+            masterSelect.value = davId;
+            onMasterSelect();
+        }
+    }
 
     const cfg = await getWebDavConfig();
     const rootPath = (cfg.roots && cfg.roots[davId]) ? cfg.roots[davId] : '/';
@@ -335,6 +440,15 @@
           listEl.appendChild(li);
         });
       }
+
+      // 等待 DOM 渲染完毕后，让整个目录面板平滑滚动到视野内
+      setTimeout(() => {
+          window.scrollTo({
+              top: document.body.scrollHeight + 50,
+              behavior: 'smooth'
+          });
+      }, 50);
+
     } catch (e) { listEl.innerHTML = `<li style="padding: 20px; text-align: center; color: var(--md-error); font-size: 13px;">目录加载失败，请检查网络或节点配置</li>`; }
   }
 
@@ -352,9 +466,13 @@
     };
     if (!payload.name || !payload.url) return alert('别名和 URL 必填');
     await fetch('/api/v1/jsplugin/dav/lists', { method: 'POST', headers: getHeaders(), body: JSON.stringify(payload) });
-    alert('✅ 节点已成功保存'); toggleForm(false); loadDavServers();
-  }
 
+    toggleForm(false);
+    await loadDavServers(); // 确保节点列表已更新
+
+    // 👇 新增：自动触发新建/编辑节点的扫描
+    triggerScan(payload.name);
+  }
   async function deleteServer() {
     const val = document.getElementById('dav-server-select').value;
     if (!val || !confirm(`确定删除 [${val}] 吗？`)) return;
@@ -396,9 +514,11 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
-    document.getElementById('btn-show-add-cmd').addEventListener('click', showCmdModal);
+    // 注意：如果是新增，必须传 null
+    document.getElementById('btn-show-add-cmd').addEventListener('click', () => showCmdModal(null));
     document.getElementById('btn-cmd-cancel').addEventListener('click', hideCmdModal);
-    document.getElementById('btn-cmd-confirm').addEventListener('click', handleConfirmAddCmd);
+    document.getElementById('btn-cmd-confirm').addEventListener('click', handleConfirmCmd);
+    document.getElementById('btn-cmd-delete').addEventListener('click', handleDeleteCmd);
 
     const mask = document.getElementById('cmd-modal-mask');
     if (mask) mask.addEventListener('click', (e) => { if (e.target === mask) hideCmdModal(); });
@@ -416,9 +536,15 @@
     document.getElementById('btn-set-default').addEventListener('click', setDefaultServer);
 
     document.getElementById('btn-browse-dir').addEventListener('click', () => {
-      document.getElementById('dav-dir-browser').style.display = 'block';
+      const browserBox = document.getElementById('dav-dir-browser');
+      browserBox.style.display = 'block';
       currentBrowserPath = document.getElementById('dav-root-path').value;
       renderDirBrowser(currentBrowserPath);
+
+      // 展开面板的瞬间也自动往下滚一下
+      setTimeout(() => {
+          browserBox.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 100);
     });
     document.getElementById('btn-dir-cancel').addEventListener('click', () => { document.getElementById('dav-dir-browser').style.display = 'none'; });
 
@@ -426,13 +552,21 @@
       document.getElementById('dav-root-path').value = currentBrowserPath;
       document.getElementById('dav-dir-browser').style.display = 'none';
       const val = document.getElementById('dav-server-select').value;
+
       if (val) {
-        // 🌟 新版：保存路径到聚合配置的 roots 节点下
         const cfg = await getWebDavConfig();
         if (!cfg.roots) cfg.roots = {};
-        cfg.roots[val] = currentBrowserPath;
-        await saveWebDavConfig(cfg);
-        alert(`✅ 根目录已保存并同步`);
+
+        const oldPath = cfg.roots[val] || '/'; // 获取之前的路径
+
+        if (oldPath !== currentBrowserPath) {
+            cfg.roots[val] = currentBrowserPath;
+            await saveWebDavConfig(cfg);
+            // 👇 路径发生了变化，直接自动触发扫描
+            triggerScan(val);
+        } else {
+            alert(`✅ 根目录未改变，无需重新扫描`);
+        }
       }
     });
 
