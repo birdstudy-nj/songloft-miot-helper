@@ -22,6 +22,7 @@ const DEF_ENABLE_LIMIT = true;
 let cachedGlobalSettings: any = {
     targetPlaylist: 'iWebPlayer推送',
     hitSound: 'SongLoft_for_u.a2ac34c5.mp3',
+    summaryTTS: 'on',
     shuffleWords: [...DEF_SHUFFLE],
     limitPrefixes: [...DEF_PREFIX],
     limitSuffixes: [...DEF_SUFFIX],
@@ -427,6 +428,11 @@ function parseVoiceCommand(query: string) {
     // 🌟 核心逻辑：如果语音没说乱序，看看这个独立口令有没有强行开启乱序
     const finalShuffle = shuffleFlag || !!best.shuffle;
 
+    // 👇 重点修改在这里：判断如果有固定关键字，绝对霸权覆盖掉用户说的词！
+    if (best.fixedKeyword) {
+        kw = best.fixedKeyword;
+    }
+
     return {
         type: best.type, engine: best.engine, node: best.node,
         quality: best.quality, strategy: best.strategy,
@@ -440,7 +446,7 @@ function parseVoiceCommand(query: string) {
 // ==========================================
 // 🚀 核心：全局意图路由表
 // ==========================================
-let voiceRoutes: Record<string, { type: string, engine: string, node: string, quality?: string, strategy?: string }> = {};
+let voiceRoutes: Record<string, { type: string, engine: string, node: string, quality?: string, strategy?: string, limit?: number, shuffle?: boolean, fixedKeyword?: string }> = {};
 
 async function rebuildVoiceRoutes() {
     try {
@@ -500,7 +506,11 @@ async function rebuildVoiceRoutes() {
             const engine = cfg.engine || 'webdav';
             if (Array.isArray(cfg.cmds)) {
                 for (const cmd of cfg.cmds) {
-                    if (cmd) voiceRoutes[cmd] = { type: cfg.type, engine, node: cfg.node, quality: cfg.quality, strategy: cfg.strategy, limit: cfg.limit, shuffle: cfg.shuffle };
+                    if (cmd) {
+                        // 👇 如果启用了，就把关键字拿出来；否则置空
+                        const fixedKeyword = cfg.enableFixedKeyword && cfg.fixedKeyword ? cfg.fixedKeyword : undefined;
+                        voiceRoutes[cmd] = { type: cfg.type, engine, node: cfg.node, quality: cfg.quality, strategy: cfg.strategy, limit: cfg.limit, shuffle: cfg.shuffle, fixedKeyword };
+                    }
                 }
             }
         }
@@ -517,9 +527,9 @@ async function rebuildVoiceRoutes() {
 }
 
 // ==========================================
-// 🎵 统一推流与入库调度指挥中枢 (流水线模式)
+// 🎵 统一推流与入库调度指挥中枢 (并行流水线模式)
 // ==========================================
-async function createPushPlaylistAndPlay(songs: any[], accountId: string, deviceId: string, engine: string) {
+async function createPushPlaylistAndPlay(songs: any[], accountId: string, deviceId: string, engine: string, collectionName: string = "") {
     if (!songs || songs.length === 0) {
         pushDebugLog('⚠️ 欲推送的歌曲列表为空，放弃建歌单');
         await playFailedSound(accountId, deviceId);
@@ -532,6 +542,54 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
         const hostUrl = await songloft.plugin.getHostUrl();
         const token = await songloft.plugin.getToken();
         const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+        // ====================================
+        // 🌟 提前并行的 TTS 播报环节
+        // ====================================
+        const firstSong = songs[0];
+        const artist = (firstSong?.artist || firstSong?.singer || '').trim();
+        const title = (firstSong?.title || firstSong?.name || '未知歌曲').trim();
+        const count = songs.length;
+        const totalStr = count > 1 ? ` 等 ${count} 首歌` : '';
+
+        pushDebugLog(`🚀 正在准备推送: 《${title}》${totalStr}`);
+        cancelAllTimers(accountId, deviceId);
+
+        let expectedTtsDelayMs = 0;
+        let ttsStartTime = Date.now(); // 记录起跑时间
+
+        if (cachedGlobalSettings.summaryTTS !== 'off') {
+            let playSuffix = "";
+            if (!artist || artist === '未知歌手') {
+                playSuffix = `歌曲 ${title}`;
+            } else {
+                playSuffix = `${artist}的${title}`;
+            }
+
+            let ttsText = collectionName
+                ? `匹配到歌单${collectionName}，共${count}首，即将播放${playSuffix}`
+                : `匹配到${count}首，即将播放${playSuffix}`;
+
+            pushDebugLog(`📣 提前触发总汇报 TTS 播报: ${ttsText}`);
+
+            const zhCount = (ttsText.match(/[\u4e00-\u9fa5]/g) || []).length;
+            const enWordCount = (ttsText.match(/[a-zA-Z0-9]+/g) || []).length;
+            const totalSyllables = zhCount + (enWordCount * 2);
+            expectedTtsDelayMs = Math.ceil(totalSyllables / 4.5) * 1000 + 1500;
+
+            // ⚠️ 重点：这里直接 fetch 发送，不再 await 阻塞！
+            // 让请求发出去后代码立刻往下走，实现"小爱说话"和"后台建单"双管齐下！
+            fetch(`${hostUrl}/api/v1/jsplugin/miot/mina/tts`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ account_id: accountId, device_id: deviceId, text: ttsText })
+            }).then(res => {
+                if (!res.ok) pushDebugLog(`⚠️ TTS 发送失败 (HTTP ${res.status})`);
+            }).catch(e => pushDebugLog(`⚠️ TTS 发生异常: ${e}`));
+
+            const delaySec = (expectedTtsDelayMs / 1000).toFixed(1);
+            pushDebugLog(`⏳ TTS 已异步下发，预计耗时 ${delaySec} 秒 (期间后台将同步执行建单入库)...`);
+        }
 
         // ====================================
         // 1. [统一环节] 一步到位删除旧歌单及连带歌曲
@@ -585,8 +643,6 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
             }
 
         } else {
-            // 🌟 相当于 Python 的 pass，暂时空着不执行入库操作
-            // 留给今后自己创建引擎（如 MusicFree）时填充逻辑
             pushDebugLog(`⚠️ 尚未实现引擎 [${engine}] 的入库逻辑，已跳过`);
         }
 
@@ -594,11 +650,18 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
         // 4. [统一环节] 下发小爱设备播放
         // ====================================
         if (isImportSuccess) {
-            const firstSongName = songs[0]?.title || songs[0]?.name || '未知歌曲';
-            const totalStr = songs.length > 1 ? ` 等 ${songs.length} 首歌` : '';
-            pushDebugLog(`🚀 正在呼叫小爱音箱即将播放: 《${firstSongName}》${totalStr}`);
+            // 🌟 结算环节：算算后台干活花了多久，把这部分时间抵扣掉
+            if (expectedTtsDelayMs > 0) {
+                const elapsed = Date.now() - ttsStartTime; // 后台跑了多长时间
+                const remaining = expectedTtsDelayMs - elapsed; // TTS 还剩多少时间没念完
 
-            cancelAllTimers(accountId, deviceId);
+                if (remaining > 0) {
+                    pushDebugLog(`⏳ 入库等前置操作耗时 ${(elapsed / 1000).toFixed(1)} 秒，继续等待 TTS 播完剩余的 ${(remaining / 1000).toFixed(1)} 秒...`);
+                    await new Promise(r => setTimeout(r, remaining));
+                } else {
+                    pushDebugLog(`⏳ 入库耗时 ${(elapsed / 1000).toFixed(1)} 秒，已完全覆盖 TTS 时长，无需挂起，立即下发播放指令！`);
+                }
+            }
 
             const playRes = await fetch(`${hostUrl}/api/v1/jsplugin/miot/player/play`, {
                 method: 'POST', headers, body: JSON.stringify({ account_id: accountId, device_id: deviceId, playlist_id: newPlaylistId, start_index: 0, play_mode: 'order' })
@@ -653,12 +716,15 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
         }
 
         try {
-            // 调用搜歌函数并拿到歌曲列表
-            const songs = await searchLxMusicSongs(cmdType, actualPlatform, rawKeyword, actualStrategy, actualQuality, pushDebugLog);
+            // 👇 修改：接收返回的对象
+            const searchRes = await searchLxMusicSongs(cmdType, actualPlatform, rawKeyword, actualStrategy, actualQuality, pushDebugLog);
 
-            if (songs === null || songs.length === 0) {
+            if (searchRes === null || searchRes.songs.length === 0) {
                 await playFailedSound(accountId, deviceId);
             } else {
+                const songs = searchRes.songs;
+                const collectionName = searchRes.collectionName; // 👇 提取出歌单名
+
                 let effectiveLimit = (parsedLimit && parsedLimit > 0) ? parsedLimit : (cachedGlobalSettings.defaultLimit || 500);
                 let finalSongs = doShuffle && songs.length > 1 ? songs.slice().sort(() => Math.random() - 0.5) : songs;
                 if (doShuffle && songs.length > 1) pushDebugLog(`🎲 已开启随机播放，打乱 ${songs.length} 首歌曲顺序`);
@@ -669,7 +735,8 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
                     finalSongs = finalSongs.slice(0, effectiveLimit);
                 }
 
-                await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'lxmusic');
+                // 👇 修改：把歌单名传给最终的推流大管家
+                await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'lxmusic', collectionName);
             }
         } catch (e) {
             pushDebugLog(`⚠️ LXMusic 执行异常: ${e}`);
@@ -717,7 +784,7 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
                 finalSongs = finalSongs.slice(0, effectiveLimit);
             }
 
-            await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'webdav');
+            await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'webdav', "");
         } else {
             pushDebugLog(`💀 彻底未搜到关于此关键字的音乐，放弃操作`);
             await playFailedSound(accountId, deviceId);
@@ -805,7 +872,7 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
                 finalSongs = finalSongs.slice(0, effectiveLimit);
             }
 
-            await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'webdav');
+            await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'webdav', result.folder);
         } else {
             pushDebugLog(`💀 彻底未找到匹配的歌单，放弃操作`);
             await playFailedSound(accountId, deviceId);
@@ -866,19 +933,47 @@ async function connectWebSocket() {
                         // 🌟 调用全新 NLP 引擎解析指令
                         const parsed = parseVoiceCommand(trimmedText);
 
-                        if (parsed && parsed.keyword) {
-                            const platDesc = parsed.platform ? ` 平台词: [${PLAT_MAP[parsed.platform] || parsed.platform}]` : '';
-                            pushDebugLog(`🎯 命中口令词: [${parsed.matchedWord}], 完整指令: "${trimmedText}"${platDesc}`);
-                            playHitSound(msg.data.account_id, msg.data.device_id);
+                        if (parsed) {
+                            if (parsed.keyword) {
+                                // 正常流程：有关键词，继续搜歌
+                                const platDesc = parsed.platform ? ` 平台词: [${PLAT_MAP[parsed.platform] || parsed.platform}]` : '';
+                                pushDebugLog(`🎯 命中口令词: [${parsed.matchedWord}], 完整指令: "${trimmedText}"${platDesc}`);
+                                playHitSound(msg.data.account_id, msg.data.device_id);
 
-                            // 传入解析好的参数
-                            handleVoiceCommand(parsed.type, parsed.engine, parsed.node, parsed.keyword, msg.data.account_id, msg.data.device_id, parsed.quality, parsed.strategy, parsed.platform, parsed.shuffleFlag, parsed.limit)
-                                .catch(async () => {
-                                    await playFailedSound(msg.data.account_id, msg.data.device_id);
-                                })
-                                .finally(() => {
-                                    pushDebugLog('========================================');
-                                });
+                                // 传入解析好的参数
+                                handleVoiceCommand(parsed.type, parsed.engine, parsed.node, parsed.keyword, msg.data.account_id, msg.data.device_id, parsed.quality, parsed.strategy, parsed.platform, parsed.shuffleFlag, parsed.limit)
+                                    .catch(async () => {
+                                        await playFailedSound(msg.data.account_id, msg.data.device_id);
+                                    })
+                                    .finally(() => {
+                                        pushDebugLog('========================================');
+                                    });
+                            } else {
+                                // 🌟 新增：空指令拦截流程 (只听到口令，没有后续内容)
+                                pushDebugLog(`⚠️ 拦截到空指令：只听到口令[${parsed.matchedWord}]，无后续关键词。`);
+                                pushDebugLog('========================================');
+
+                                // 启动一个异步闭包发送 TTS 语音，不阻塞 WebSocket 主线程
+                                (async () => {
+                                    try {
+                                        const hostUrl = await songloft.plugin.getHostUrl();
+                                        const token = await songloft.plugin.getToken();
+                                        const ttsText = `语音助手只听到，${parsed.matchedWord}，没有后续内容，请重试。`;
+
+                                        await fetch(`${hostUrl}/api/v1/jsplugin/miot/mina/tts`, {
+                                            method: 'POST',
+                                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                account_id: msg.data.account_id,
+                                                device_id: msg.data.device_id,
+                                                text: ttsText
+                                            })
+                                        });
+                                    } catch (e) {
+                                        pushDebugLog(`⚠️ 空指令 TTS 提示异常: ${e}`);
+                                    }
+                                })();
+                            }
                         }
                     }
                 }

@@ -21,11 +21,15 @@ function parsePlayCount(str: string): number {
     return isNaN(num) ? 0 : num;
 }
 
-export async function searchLxMusicSongs(cmdType: string, platform: string, keyword: string, strategy: string, targetQuality: string, logFn: (msg: string) => void): Promise<any[] | null> {
+// 👇 修改 1：改变了函数的返回值类型，增加 collectionName
+export async function searchLxMusicSongs(cmdType: string, platform: string, keyword: string, strategy: string, targetQuality: string, logFn: (msg: string) => void): Promise<{songs: any[], collectionName: string} | null> {
     const hostUrl = await songloft.plugin.getHostUrl();
     const token = await songloft.plugin.getToken();
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
     let lxSongsToImport: any[] = [];
+
+    // 👇 修改 2：准备一个变量来装匹配到的集合名字
+    let collectionName = "";
 
     const stratMap: Record<string, string> = { first: '默认首个', random: '随机抽取', play_count: '热度优先', total: '数量优先' };
     const platMap: Record<string, string> = { wy: '网易云', tx: 'QQ音乐', kg: '酷狗', kw: '酷我', mg: '咪咕' };
@@ -33,20 +37,20 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
     const cnStrategy = stratMap[strategy] || strategy;
 
     if (cmdType === 'search') {
-        logFn(`🔍 开始在 LXMusic [${cnPlatform}] 检索单曲: "${keyword}"`);
+        logFn(`🔍 开始在 LXMusic [${cnPlatform}] 检索歌曲: "${keyword}"`);
         try {
             const reqBody = { keyword: keyword, source_id: platform, type: 'song', page: 1 };
             const res = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify(reqBody) });
             const data = await res.json();
             const list = data?.data?.list || [];
 
-            if (list.length === 0) { logFn(`⚠️ 未搜到关于 "${keyword}" 的单曲，已熔断`); return []; }
+            if (list.length === 0) { logFn(`⚠️ 未搜到关于 "${keyword}" 的歌曲，已熔断`); return []; }
 
             lxSongsToImport = list.map((song: any) => {
                 song.quality = resolveQuality(song.types, targetQuality);
                 return song;
             });
-            logFn(`🎯 成功检索到 ${lxSongsToImport.length} 首单曲 (目标期望音质: ${targetQuality})`);
+            logFn(`🎯 成功检索到 ${lxSongsToImport.length} 首歌曲 (目标期望音质: ${targetQuality})`);
         } catch(e) { logFn(`❌ LXMusic 搜歌接口异常: ${e}`); return null; }
 
     } else if (cmdType === 'play') {
@@ -71,6 +75,10 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
             }
 
             logFn(`🎯 命中歌单: [${selectedPlaylist.name}] (播放量: ${selectedPlaylist.play_count || 0}, 曲目: ${selectedPlaylist.total || 0})`);
+
+            // 👇 修改 3：记录命中的歌单名
+            collectionName = selectedPlaylist.name;
+
             logFn(`⏳ 正在拉取该歌单明细...`);
 
             const detailUrl = `${hostUrl}/api/v1/jsplugin/lxmusic/api/songlist/detail?source_id=${platform}&id=${selectedPlaylist.id}&page=1`;
@@ -113,7 +121,7 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
 
             // 🌟 2. 双保险兜底：降级至 song 泛搜，只取首页前20首
             if (raw.length === 0) {
-                logFn(`⚠️ 专属歌手接口无数据，降级使用单曲泛搜模式(仅截取首页20首)...`);
+                logFn(`⚠️ 专属歌手接口无数据，降级使用歌曲泛搜模式(仅截取首页20首)...`);
                 const res = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify({ keyword: keyword, source_id: platform, type: 'song', page: 1 }) });
                 const data = await res.json();
                 raw = (data?.data?.list || []).slice(0, 20);
@@ -149,6 +157,10 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
         if (!board) { logFn(`⚠️ 未在任何平台匹配到排行榜 "${kw}"`); return []; }
 
         logFn(`🎯 命中排行榜: [${platMap[usedPlat]||usedPlat}] ${board.name}，正在拉取歌曲...`);
+
+        // 👇 修改 4：记录命中的排行榜名
+        collectionName = board.name;
+
         try {
             let page = 1;
             while (true) {
@@ -169,6 +181,10 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
 
     } else if (cmdType === 'album') {
         logFn(`💿 开始在 LXMusic [${cnPlatform}] 检索专辑: "${keyword}"`);
+
+        // 默认用搜索词作为专辑名，如果下面清洗出更准确的名字会覆盖它
+        collectionName = keyword;
+
         try {
             let raw: any[] = [];
             let isNativeSuccess = false;
@@ -193,7 +209,7 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
                 logFn(`🎯 原生专辑接口命中，直接采用返回的 ${raw.length} 首歌曲`);
                 lxSongsToImport = raw.map((s: any) => { s.quality = resolveQuality(s.types, targetQuality); return s; });
             } else {
-                logFn(`⚠️ 专属专辑接口无数据，降级使用单曲泛搜+智能清洗模式(仅取首页20首)...`);
+                logFn(`⚠️ 专属专辑接口无数据，降级使用歌曲泛搜+智能清洗模式(仅取首页20首)...`);
                 const sres = await fetch(`${hostUrl}/api/v1/jsplugin/lxmusic/api/search`, { method: 'POST', headers, body: JSON.stringify({ keyword: keyword, source_id: platform, type: 'song', page: 1 }) });
                 const sdata = await sres.json();
                 raw = (sdata?.data?.list || []).slice(0, 20);
@@ -205,6 +221,9 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
                 for (const s of raw) { const a = (s.album || '').trim(); if (a) albumCounts[a] = (albumCounts[a] || 0) + 1; }
                 let bestAlbum = null, bestAlbumCount = -1;
                 for (const a in albumCounts) { if (albumCounts[a] > bestAlbumCount) { bestAlbumCount = albumCounts[a]; bestAlbum = a; } }
+
+                // 👇 修改 5：记录清洗出来的最精准专辑名
+                collectionName = bestAlbum || keyword;
 
                 let kept = bestAlbum ? raw.filter((s:any) => (s.album||'').trim() === bestAlbum) : raw.filter((s:any) => (s.album||'').includes(keyword));
                 if (kept.length === 0) kept = raw;
@@ -227,5 +246,6 @@ export async function searchLxMusicSongs(cmdType: string, platform: string, keyw
         } catch (e) { logFn(`❌ LXMusic 专辑检索异常: ${e}`); return null; }
     }
 
-    return lxSongsToImport;
+    // 👇 修改 6：把提取到的 collectionName 和歌曲列表捆绑在一起，打包返回！
+    return { songs: lxSongsToImport, collectionName };
 }
