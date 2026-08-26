@@ -55,10 +55,13 @@
       box.className = 'mh-field'; box.id = containerId;
 
       let badgeHtml = '';
-      if (!isDefault && (cfg.limit || cfg.shuffle)) {
+      if (!isDefault && (cfg.limit || cfg.shuffle || (cfg.enableFixedKeyword && cfg.fixedKeyword))) {
           badgeHtml = `<div style="display: flex; gap: 4px; align-items: center;">`;
           if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
           if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">乱序: 开启</span>`;
+          if (cfg.enableFixedKeyword && cfg.fixedKeyword) {
+              badgeHtml += `<span style="background: var(--md-primary); color: var(--md-on-primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">固定词: ${cfg.fixedKeyword}</span>`;
+          }
           badgeHtml += `</div>`;
       }
 
@@ -74,7 +77,6 @@
       const placeholderText = cfg.type === 'play' ? '输入口令，如：网盘歌单' : '输入口令，如：网盘歌曲';
       const isEnabled = cfg.enabled !== false; // 默认启用
 
-      // 🌟 引入带开关的双行结构，按钮改名“➕ 口令”
       box.innerHTML = `
         ${titleHtml}
         <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
@@ -94,7 +96,6 @@
         if (e.key === 'Enter') addVoiceCmd(cfg.type, cfg.node);
       });
 
-      // 🌟 绑定开关置灰与保存逻辑
       const toggleEl = document.getElementById(`enable-${mapKey}`);
       const tagsEl = document.getElementById(`tags-${mapKey}`);
       const inputArea = document.getElementById(`input-area-${mapKey}`);
@@ -127,7 +128,6 @@
     const arr = (cfg && cfg.cmds) ? cfg.cmds : [];
 
     container.innerHTML = '';
-    // 统一的口令为空提示
     if (arr.length === 0) {
         container.innerHTML = `<span style="color: var(--md-error); font-size: 13px; display: inline-flex; align-items: center; height: 28px; font-weight: 500;">⚠️ 请增加口令</span>`;
         return;
@@ -177,7 +177,6 @@
     const nodeSelect = document.getElementById('modal-cmd-node');
     if (!mask || !nodeSelect) return;
 
-    // 填充节点下拉框
     nodeSelect.innerHTML = '';
     if (currentDavServers.length === 0) {
       nodeSelect.innerHTML = '<option value="">暂无可关联节点，请先添加</option>';
@@ -194,9 +193,19 @@
 
     const limitEl = document.getElementById('modal-cmd-limit');
     const shuffleEl = document.getElementById('modal-cmd-shuffle');
+    const enableFixedEl = document.getElementById('modal-cmd-enable-fixed');
+    const fixedKwEl = document.getElementById('modal-cmd-fixed-kw');
+    const fixedWrap = document.getElementById('modal-cmd-fixed-wrap');
+
+    const updateWdFixedUi = (enabled) => {
+        if (fixedWrap) {
+            fixedWrap.style.opacity = enabled ? '1' : '0.4';
+            fixedWrap.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+    };
+    if (enableFixedEl) enableFixedEl.onchange = (e) => updateWdFixedUi(e.target.checked);
 
     if (editMode) {
-        // 编辑模式回显
         document.getElementById('cmd-modal-title').innerText = '✏️ 编辑控制条目';
         document.getElementById('btn-cmd-confirm').innerText = '✅ 修改';
         document.getElementById('btn-cmd-delete').style.display = 'inline-flex';
@@ -204,11 +213,13 @@
         document.getElementById('modal-cmd-type').value = editMode.type;
         document.getElementById('modal-cmd-node').value = editMode.node;
 
-        // 新增回显
         if (limitEl) limitEl.value = editMode.limit || '';
         if (shuffleEl) shuffleEl.checked = !!editMode.shuffle;
+
+        if (enableFixedEl) enableFixedEl.checked = !!editMode.enableFixedKeyword;
+        if (fixedKwEl) fixedKwEl.value = editMode.fixedKeyword || '';
+        updateWdFixedUi(!!editMode.enableFixedKeyword);
     } else {
-        // 新增模式
         document.getElementById('cmd-modal-title').innerText = '➕ 新增控制条目';
         document.getElementById('btn-cmd-confirm').innerText = '✅ 创建';
         document.getElementById('btn-cmd-delete').style.display = 'none';
@@ -217,6 +228,10 @@
 
         if (limitEl) limitEl.value = '';
         if (shuffleEl) shuffleEl.checked = false;
+
+        if (enableFixedEl) enableFixedEl.checked = false;
+        if (fixedKwEl) fixedKwEl.value = '';
+        updateWdFixedUi(false);
     }
 
     mask.style.display = 'flex';
@@ -242,16 +257,21 @@
     const limit = limitStr ? parseInt(limitStr, 10) : '';
     const shuffle = document.getElementById('modal-cmd-shuffle').checked;
 
+    const enableFixedKeyword = document.getElementById('modal-cmd-enable-fixed').checked;
+    const fixedKeyword = document.getElementById('modal-cmd-fixed-kw').value.trim();
+
     if (currentWdEditMode) {
         const cfg = cmdConfigs.find(c => c.type === currentWdEditMode.type && c.node === currentWdEditMode.node);
         if (cfg) {
             cfg.type = type; cfg.node = node;
             cfg.label = type === 'play' ? `播放 WebDAV 歌单口令(${node})` : `播放 WebDAV 歌曲口令(${node})`;
             cfg.limit = limit; cfg.shuffle = shuffle;
+            cfg.enableFixedKeyword = enableFixedKeyword;
+            cfg.fixedKeyword = fixedKeyword;
         }
     } else {
         const typeText = type === 'play' ? '播放 WebDAV 歌单口令' : '播放 WebDAV 歌曲口令';
-        cmdConfigs.push({ type, node, label: `${typeText}(${node})`, enabled: true, isDefault: false, cmds: [], limit, shuffle });
+        cmdConfigs.push({ type, node, label: `${typeText}(${node})`, enabled: true, isDefault: false, cmds: [], limit, shuffle, enableFixedKeyword, fixedKeyword });
     }
 
     await autoSaveVoiceCmds();
@@ -270,7 +290,6 @@
 
   // ========== 其余 WebDAV 逻辑 ==========
 
-  // 🌟 WebDAV 全局聚合配置读取助手
   async function getWebDavConfig() {
       const res = await apiGet('/store?key=webdav_config');
       if (res && res.data && res.data !== 'null' && res.data !== '[]') {
@@ -279,7 +298,6 @@
       return { settings: { mode: 'proxy', default_server: '' }, roots: {}, search_history: [] };
   }
 
-  // 🌟 WebDAV 全局聚合配置保存助手
   async function saveWebDavConfig(cfg) {
       await apiPost('/store', { key: 'webdav_config', value: JSON.stringify(cfg) });
   }
@@ -288,7 +306,6 @@
     try {
       const res = await fetch('/api/v1/jsplugin/dav/lists', { headers: getHeaders() });
 
-      // 🌟 拦截 WebDAV 页的 403 报错
       if (res.status === 403) {
           const json = await res.json().catch(() => ({}));
           if (json.detail === 'plugin_disabled') {
@@ -300,7 +317,6 @@
       if (!res.ok) throw new Error("未启用 dav 插件");
       currentDavServers = await res.json() || [];
 
-      // 读取最新聚合配置
       const cfg = await getWebDavConfig();
       defaultServerName = cfg.settings.default_server || '';
 
@@ -334,11 +350,9 @@
     const textEl = document.getElementById('scan-stats-text');
     if (!davId) { textEl.innerHTML = '暂无节点'; return; }
     try {
-      // 🌟 纯净新版：直接读取 webdav_lib_xxx，不带任何老版本兼容和提示
       const res = await apiGet(`/store?key=${encodeURIComponent('webdav_lib_' + davId)}`);
       if (res && res.data && res.data !== 'null') {
           const stats = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-          // 直接按新版结构盲读，读不到就是 0 或 未知
           textEl.innerHTML = `包含 <b>${stats.folders || 0}</b> 个歌单，共 <b>${stats.songs || 0}</b> 首歌曲 <span style="opacity:0.7; margin-left:8px;">(上次扫描: ${stats.time || '未知'})</span>`;
       } else {
           textEl.innerHTML = `尚未建立索引，请点击下方建立`;
@@ -356,13 +370,11 @@
   }
 
   async function triggerScan(eventOrDavId) {
-    // 判断是手动点击(传入事件对象)还是代码全自动调用(传入字符串节点名)
     const isAuto = typeof eventOrDavId === 'string';
     const davId = isAuto ? eventOrDavId : document.getElementById('dav-master-select').value;
 
     if (!davId) return alert('请先选择一个节点');
 
-    // 如果是全自动触发的，顺便把上方的下拉框切换到该节点，让用户能直观看到扫描进度
     if (isAuto) {
         const masterSelect = document.getElementById('dav-master-select');
         if (masterSelect.value !== davId) {
@@ -441,7 +453,6 @@
         });
       }
 
-      // 等待 DOM 渲染完毕后，让整个目录面板平滑滚动到视野内
       setTimeout(() => {
           window.scrollTo({
               top: document.body.scrollHeight + 50,
@@ -468,9 +479,7 @@
     await fetch('/api/v1/jsplugin/dav/lists', { method: 'POST', headers: getHeaders(), body: JSON.stringify(payload) });
 
     toggleForm(false);
-    await loadDavServers(); // 确保节点列表已更新
-
-    // 👇 新增：自动触发新建/编辑节点的扫描
+    await loadDavServers();
     triggerScan(payload.name);
   }
   async function deleteServer() {
@@ -478,7 +487,6 @@
     if (!val || !confirm(`确定删除 [${val}] 吗？`)) return;
     await fetch(`/api/v1/jsplugin/dav/lists/${encodeURIComponent(val)}`, { method: 'DELETE', headers: getHeaders() });
 
-    // 清除聚合配置中的此节点
     const cfg = await getWebDavConfig();
     let changed = false;
     if (cfg.settings.default_server === val) { cfg.settings.default_server = ''; changed = true; }
@@ -514,7 +522,6 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
-    // 注意：如果是新增，必须传 null
     document.getElementById('btn-show-add-cmd').addEventListener('click', () => showCmdModal(null));
     document.getElementById('btn-cmd-cancel').addEventListener('click', hideCmdModal);
     document.getElementById('btn-cmd-confirm').addEventListener('click', handleConfirmCmd);
@@ -541,7 +548,6 @@
       currentBrowserPath = document.getElementById('dav-root-path').value;
       renderDirBrowser(currentBrowserPath);
 
-      // 展开面板的瞬间也自动往下滚一下
       setTimeout(() => {
           browserBox.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }, 100);
@@ -557,12 +563,11 @@
         const cfg = await getWebDavConfig();
         if (!cfg.roots) cfg.roots = {};
 
-        const oldPath = cfg.roots[val] || '/'; // 获取之前的路径
+        const oldPath = cfg.roots[val] || '/';
 
         if (oldPath !== currentBrowserPath) {
             cfg.roots[val] = currentBrowserPath;
             await saveWebDavConfig(cfg);
-            // 👇 路径发生了变化，直接自动触发扫描
             triggerScan(val);
         } else {
             alert(`✅ 根目录未改变，无需重新扫描`);

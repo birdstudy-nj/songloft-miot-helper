@@ -88,6 +88,9 @@
           if (cfg.type === 'play') badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">策略: ${stratMap[cfg.strategy] || '默认'}</span>`;
           if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
           if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">乱序: 开启</span>`;
+          if (cfg.enableFixedKeyword && cfg.fixedKeyword) {
+              badgeHtml += `<span style="background: var(--md-primary); color: var(--md-on-primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">固定词: ${cfg.fixedKeyword}</span>`;
+          }
           badgeHtml += `</div>`;
       }
 
@@ -399,18 +402,34 @@
 
       let currentEditMode = null;
 
-      // 1. 点击“新增控制条目”时：进入【新增模式】
+      // 🌟 提取一个更新固定词输入框 UI 状态的函数
+      const updateLxFixedKwUi = (enabled) => {
+          const wrap = document.getElementById('modal-lx-cmd-fixed-wrap');
+          if (wrap) {
+              wrap.style.opacity = enabled ? '1' : '0.4';
+              wrap.style.pointerEvents = enabled ? 'auto' : 'none';
+          }
+      };
+
+      // 绑定开关事件
+      document.getElementById('modal-lx-cmd-enable-fixed')?.addEventListener('change', (e) => {
+          updateLxFixedKwUi(e.target.checked);
+      });
+
+      // 1. 点击“新增”时
       document.getElementById('btn-show-add-lx-cmd')?.addEventListener('click', () => {
           currentEditMode = null;
-          // UI 初始化
           document.getElementById('lx-cmd-modal-title').innerText = '➕ 新增控制条目';
           document.getElementById('btn-lx-cmd-confirm').innerText = '✅ 创建';
-          document.getElementById('btn-lx-cmd-delete').style.display = 'none'; // 隐藏删除按钮
+          document.getElementById('btn-lx-cmd-delete').style.display = 'none';
 
-          const limitEl = document.getElementById('modal-lx-cmd-limit');
-          if (limitEl) limitEl.value = '';
-          const shuffleEl = document.getElementById('modal-lx-cmd-shuffle');
-          if (shuffleEl) shuffleEl.checked = false;
+          if (document.getElementById('modal-lx-cmd-limit')) document.getElementById('modal-lx-cmd-limit').value = '';
+          if (document.getElementById('modal-lx-cmd-shuffle')) document.getElementById('modal-lx-cmd-shuffle').checked = false;
+
+          // 👇 重置固定词
+          if (document.getElementById('modal-lx-cmd-enable-fixed')) document.getElementById('modal-lx-cmd-enable-fixed').checked = false;
+          if (document.getElementById('modal-lx-cmd-fixed-kw')) document.getElementById('modal-lx-cmd-fixed-kw').value = '';
+          updateLxFixedKwUi(false);
 
           document.getElementById('modal-lx-cmd-type').value = 'play';
           document.getElementById('modal-lx-cmd-node').value = 'wy';
@@ -422,18 +441,16 @@
           if (mask) mask.style.display = 'flex';
       });
 
-      // 2. 点击列表里的“编辑”时：进入【编辑模式】并回显数据
+      // 2. 点击“编辑”时
       window._editLxCmdGroup = function(type, node) {
           const cfg = lxCmdConfigs.find(c => c.type === type && c.node === node);
           if (!cfg) return;
-          currentEditMode = { type, node }; // 记录靶向靶标
+          currentEditMode = { type, node };
 
-          // UI 初始化
           document.getElementById('lx-cmd-modal-title').innerText = '✏️ 编辑控制条目';
           document.getElementById('btn-lx-cmd-confirm').innerText = '✅ 修改';
-          document.getElementById('btn-lx-cmd-delete').style.display = 'inline-flex'; // 显示删除按钮
+          document.getElementById('btn-lx-cmd-delete').style.display = 'inline-flex';
 
-          // 核心：回显数据到表单
           document.getElementById('modal-lx-cmd-type').value = cfg.type || 'play';
           document.getElementById('modal-lx-cmd-node').value = cfg.node || 'wy';
           document.getElementById('modal-lx-cmd-quality').value = cfg.quality || '320k';
@@ -441,19 +458,22 @@
           document.getElementById('modal-lx-cmd-limit').value = cfg.limit || '';
           document.getElementById('modal-lx-cmd-shuffle').checked = !!cfg.shuffle;
 
-          // 触发一次 change 事件以联动显示/隐藏策略框
+          // 👇 回显固定词
+          const enableFixed = !!cfg.enableFixedKeyword;
+          document.getElementById('modal-lx-cmd-enable-fixed').checked = enableFixed;
+          document.getElementById('modal-lx-cmd-fixed-kw').value = cfg.fixedKeyword || '';
+          updateLxFixedKwUi(enableFixed);
+
           document.getElementById('modal-lx-cmd-type').dispatchEvent(new Event('change'));
 
           const mask = document.getElementById('lx-cmd-modal-mask');
           if (mask) mask.style.display = 'flex';
       };
 
-      // 3. 弹窗关闭与取消
       const hideModal = () => { document.getElementById('lx-cmd-modal-mask').style.display = 'none'; };
       document.getElementById('btn-lx-cmd-cancel')?.addEventListener('click', hideModal);
       document.getElementById('lx-cmd-modal-mask')?.addEventListener('click', (e) => { if (e.target.id === 'lx-cmd-modal-mask') hideModal(); });
 
-      // 4. 处理弹窗内的【删除】
       document.getElementById('btn-lx-cmd-delete')?.addEventListener('click', async () => {
           if (!currentEditMode) return;
           if (!confirm('确定彻底删除该配置组吗？（包含其中的所有口令词将一并清除）')) return;
@@ -464,7 +484,7 @@
           renderLxCmdContainers();
       });
 
-      // 5. 处理弹窗内的【确认】（根据状态自动分流：新增 or 更新）
+      // 3. 确认保存
       document.getElementById('btn-lx-cmd-confirm')?.addEventListener('click', async () => {
         const type = document.getElementById('modal-lx-cmd-type').value;
         const node = document.getElementById('modal-lx-cmd-node').value;
@@ -475,26 +495,27 @@
         const limit = limitStr ? parseInt(limitStr, 10) : '';
         const shuffle = document.getElementById('modal-lx-cmd-shuffle').checked;
 
+        // 👇 获取固定词状态
+        const enableFixedKeyword = document.getElementById('modal-lx-cmd-enable-fixed').checked;
+        const fixedKeyword = document.getElementById('modal-lx-cmd-fixed-kw').value.trim();
+
         if (currentEditMode) {
-            // == 编辑模式 ==
-            // 拦截：如果用户把平台或类型改成了另一个已经存在的项（防冲突）
             if ((type !== currentEditMode.type || node !== currentEditMode.node) &&
                 lxCmdConfigs.find(c => c.type === type && c.node === node && !c.isDefault)) {
                 return alert('⚠️ 目标平台的该类型配置已存在，无法修改为该类型，请换一个');
             }
 
-            // 找到原靶标进行数据覆盖更新
             const cfg = lxCmdConfigs.find(c => c.type === currentEditMode.type && c.node === currentEditMode.node);
             if (cfg) {
                 cfg.type = type; cfg.node = node; cfg.quality = quality;
                 cfg.strategy = strategy; cfg.limit = limit; cfg.shuffle = shuffle;
+                cfg.enableFixedKeyword = enableFixedKeyword; cfg.fixedKeyword = fixedKeyword; // 👇 写入
             }
         } else {
-            // == 新增模式 ==
             if (lxCmdConfigs.find(c => c.type === type && c.node === node && !c.isDefault)) {
                 return alert('⚠️ 该平台的类型已存在，请直接在列表中点“编辑”修改');
             }
-            lxCmdConfigs.push({ engine: 'lxmusic', type, node, quality, strategy, limit, shuffle, enabled: true, isDefault: false, cmds: [] });
+            lxCmdConfigs.push({ engine: 'lxmusic', type, node, quality, strategy, limit, shuffle, enableFixedKeyword, fixedKeyword, enabled: true, isDefault: false, cmds: [] });
         }
 
         await autoSaveLxCmds();

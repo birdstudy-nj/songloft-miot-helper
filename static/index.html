@@ -339,6 +339,14 @@
             <option value="">不启用 (不打断小爱语音)</option>
           </select>
         </div>
+
+        <div class="mh-field" style="margin-bottom: 0; margin-top: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 0;">搜索命中后总汇报播报</label>
+            <input type="checkbox" id="global-summary-tts" class="mh-switch-input" checked title="启用/停用总汇报播报">
+          </div>
+          <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 6px;">搜索成功后，在播放前用小爱语音一次性总结并播报搜索成果。</div>
+        </div>
       </div>
 
       <!-- 👇 🌟 高阶 NLP 胶囊设置区块 -->
@@ -407,7 +415,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.6.1</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.6.2</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -471,7 +479,7 @@
               <label>功能类型</label>
               <select id="modal-lx-cmd-type" class="mh-select">
                 <option value="play">搜索歌单</option>
-                <option value="search">搜索单曲</option>
+                <option value="search">搜索歌曲</option>
                 <option value="singer">搜索歌手</option>
                 <option value="album">搜索专辑</option>
                 <option value="rank">搜索榜单</option>
@@ -502,6 +510,18 @@
             <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center;">
               <label style="margin-bottom: 0;">获取歌曲后乱序</label>
               <input type="checkbox" id="modal-lx-cmd-shuffle" class="mh-switch-input">
+            </div>
+
+            <!-- 固定关键字开关与输入框 (LXMusic) -->
+            <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; border-top: 1px dashed var(--md-outline-variant); padding-top: 12px;">
+              <div>
+                <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">启用固定关键字</label>
+                <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">无论设置什么口令，都只搜索关键字</div>
+              </div>
+              <input type="checkbox" id="modal-lx-cmd-enable-fixed" class="mh-switch-input" style="margin-left: 12px;">
+            </div>
+            <div class="mh-field" id="modal-lx-cmd-fixed-wrap" style="transition: opacity 0.2s; opacity: 0.4; pointer-events: none;">
+              <input type="text" id="modal-lx-cmd-fixed-kw" class="mh-input" placeholder="输入固定词汇，如：热歌榜">
             </div>
 
             <div style="display: flex; align-items: center; margin-top: 20px; width: 100%;">
@@ -587,6 +607,18 @@
             <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center;">
               <label style="margin-bottom: 0;">获取歌曲后乱序</label>
               <input type="checkbox" id="modal-cmd-shuffle" class="mh-switch-input">
+            </div>
+
+            <!-- 固定关键字开关与输入框 (WebDAV) -->
+            <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; border-top: 1px dashed var(--md-outline-variant); padding-top: 12px;">
+              <div>
+                <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">启用固定关键字</label>
+                <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">无论设置什么口令，都只搜索关键字</div>
+              </div>
+              <input type="checkbox" id="modal-cmd-enable-fixed" class="mh-switch-input" style="margin-left: 12px;">
+            </div>
+            <div class="mh-field" id="modal-cmd-fixed-wrap" style="transition: opacity 0.2s; opacity: 0.4; pointer-events: none;">
+              <input type="text" id="modal-cmd-fixed-kw" class="mh-input" placeholder="输入固定词汇，如：经典老歌">
             </div>
 
             <div style="display: flex; align-items: center; margin-top: 20px; width: 100%;">
@@ -850,14 +882,15 @@
 
     const defaultLimit = parseInt(document.getElementById('global-default-limit')?.value, 10) || 500;
 
-    // 🌟 新增：抓取界面上两个开关的状态
+    const summaryTTS = document.getElementById('global-summary-tts')?.checked ? 'on' : 'off';
+
     const enableShuffle = document.getElementById('nlp-enable-shuffle')?.checked !== false;
     const enableLimit = document.getElementById('nlp-enable-limit')?.checked !== false;
 
-    // 🌟 新增：将开关状态打包进 payload
     const payload = {
         targetPlaylist,
         hitSound,
+        summaryTTS,
         shuffleWords: nlpShuffleWords,
         limitPrefixes: nlpLimitPrefixes,
         limitSuffixes: nlpLimitSuffixes,
@@ -972,8 +1005,9 @@
     // 2. 前置语音提示音 -> 绑定 change 事件
     document.getElementById('global-hit-sound')?.addEventListener('change', saveGlobalSettings);
     document.getElementById('global-default-limit')?.addEventListener('change', saveGlobalSettings);
+    document.getElementById('global-summary-tts')?.addEventListener('change', saveGlobalSettings);
 
-    // 🌟 新增：绑定 UI 开关点击事件，触发透明度更新和数据保存
+    // 绑定 UI 开关点击事件，触发透明度更新和数据保存
     document.getElementById('nlp-enable-shuffle')?.addEventListener('change', () => { updateNlpUiState(); saveGlobalSettings(); });
     document.getElementById('nlp-enable-limit')?.addEventListener('change', () => { updateNlpUiState(); saveGlobalSettings(); });
 
@@ -1200,6 +1234,11 @@
       // 恢复提示音下拉框的选中项
       if (soundSelect && savedSettings.hitSound !== undefined) {
         soundSelect.value = savedSettings.hitSound;
+      }
+
+      const summaryTtsToggle = document.getElementById('global-summary-tts');
+      if (summaryTtsToggle && savedSettings.summaryTTS !== undefined) {
+          summaryTtsToggle.checked = savedSettings.summaryTTS !== 'off';
       }
 
       // 🌟 恢复 NLP 胶囊的数组，如果没配过就用我们在顶部声明的默认数组
