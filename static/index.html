@@ -306,10 +306,11 @@
       <div class="mh-tabs" id="mh-tabs-scroll">
         <button class="mh-tab active" data-target="tab-debug">诊断</button>
         <button class="mh-tab" data-target="tab-settings">设置</button>
-        <button class="mh-tab" data-target="tab-resume">续播</button>
         <button class="mh-tab" data-target="tab-lxmusic">LXMusic</button>
         <button class="mh-tab" data-target="tab-musicfree">MusicFree</button>
         <button class="mh-tab" data-target="tab-webdav">WebDAV</button>
+        <button class="mh-tab" data-target="tab-resume">续播</button>
+        <button class="mh-tab" data-target="tab-expert">专家</button>
         <button class="mh-tab" data-target="tab-about">关于</button>
       </div>
 
@@ -404,9 +405,127 @@
       </div>
     </div>
 
-    <div id="tab-resume" class="mh-pane"><div class="card">续播功能建设中，打算支持iWebPlayer和有声书的续播...</div></div>
-    <div id="tab-musicfree" class="mh-pane"><div class="card">MusicFree 引擎建设中...</div></div>
 
+    <div id="tab-musicfree" class="mh-pane">
+      <!-- 🌟 1. 口令设置区块 -->
+      <div class="card">
+        <div style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
+          <div class="card-title" style="margin: 0;">🎙️ 小爱口令设置 (MusicFree)</div>
+          <button class="mh-btn" id="btn-show-add-mf-cmd" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增控制条目</button>
+        </div>
+
+        <div id="mf-cmd-modal-mask" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.4); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
+          <div class="modal-box">
+            <div class="card-title" id="mf-cmd-modal-title" style="margin-bottom: 16px;">➕ 新增控制条目</div>
+            <div class="mh-field">
+              <label>功能类型</label>
+              <select id="modal-mf-cmd-type" class="mh-select">
+                <option value="search">搜索歌曲</option>
+                <option value="play">搜索歌单 (待开发)</option>
+              </select>
+            </div>
+            <div class="mh-field">
+              <label>目标平台 (自动从源提取)</label>
+              <select id="modal-mf-cmd-node" class="mh-select">
+                <option value="default">默认首个可用源</option>
+              </select>
+            </div>
+            <div class="mh-field">
+              <label>期望最高音质</label>
+              <select id="modal-mf-cmd-quality" class="mh-select">
+                <option value="high">无损/极高 (high)</option>
+                <option value="standard" selected>高品质 (standard)</option>
+                <option value="low">标准 (low)</option>
+              </select>
+            </div>
+            <div class="mh-field" id="mf-strategy-field">
+              <label>歌单决选策略 (暂作保留)</label>
+              <select id="modal-mf-cmd-strategy" class="mh-select">
+                <option value="first">默认首个</option><option value="random">随机抽取</option><option value="play_count">热度优先</option><option value="total">数量优先</option>
+              </select>
+            </div>
+            <div class="mh-field">
+              <label>截取多少首 (留空则使用全局默认)</label>
+              <input type="number" id="modal-mf-cmd-limit" class="mh-input" placeholder="例如：20">
+            </div>
+            <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="margin-bottom: 0;">获取歌曲后乱序</label>
+              <input type="checkbox" id="modal-mf-cmd-shuffle" class="mh-switch-input">
+            </div>
+
+            <!-- 固定关键字开关 -->
+            <div class="mh-field" style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; border-top: 1px dashed var(--md-outline-variant); padding-top: 12px;">
+              <div>
+                <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">启用固定关键字</label>
+                <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">无论设置什么口令，都只搜索关键字</div>
+              </div>
+              <input type="checkbox" id="modal-mf-cmd-enable-fixed" class="mh-switch-input" style="margin-left: 12px;">
+            </div>
+            <div class="mh-field" id="modal-mf-cmd-fixed-wrap" style="transition: opacity 0.2s; opacity: 0.4; pointer-events: none;">
+              <input type="text" id="modal-mf-cmd-fixed-kw" class="mh-input" placeholder="输入固定词汇，如：热歌榜">
+            </div>
+
+            <div style="display: flex; align-items: center; margin-top: 20px; width: 100%;">
+              <div style="flex: 1; display: flex; justify-content: flex-start;">
+                <button class="mh-btn mh-btn-danger" id="btn-mf-cmd-delete" style="display: none;">🗑️ 删除</button>
+              </div>
+              <div style="flex: 1; display: flex; justify-content: center;">
+                <button class="mh-btn" id="btn-mf-cmd-cancel">❌ 取消</button>
+              </div>
+              <div style="flex: 1; display: flex; justify-content: flex-end;">
+                <button class="mh-btn" id="btn-mf-cmd-confirm">✅ 创建</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="mf-cmd-containers"></div>
+      </div>
+
+      <!-- 🌟 2. 全局默认偏好区块 -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom: 12px;">🌟 全局默认配置偏好</div>
+        <p class="desc" style="margin-bottom: 16px;">配置的参数将作为上方“默认配置”口令触发时的执行策略。</p>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <div class="mh-field" style="flex: 1; min-width: 150px;">
+            <label>默认搜索平台</label>
+            <select id="mf-def-platform" class="mh-select">
+              <option value="default">自动 (首个可用源)</option>
+            </select>
+          </div>
+          <div class="mh-field" style="flex: 1; min-width: 150px;">
+            <label>默认最高音质</label>
+            <select id="mf-def-quality" class="mh-select">
+              <option value="high">无损/极高 (high)</option><option value="standard" selected>高品质 (standard)</option><option value="low">标准 (low)</option>
+            </select>
+          </div>
+          <div class="mh-field" style="flex: 1; min-width: 150px;">
+            <label>默认歌单策略</label>
+            <select id="mf-def-strategy" class="mh-select">
+              <option value="first">默认首个</option><option value="random">随机抽取</option><option value="play_count">热度优先</option><option value="total">数量优先</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 🌟 3. 源管理区块 -->
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+          <span>⚙️ MusicFree 源脚本管理</span>
+          <button class="mh-btn" id="btn-mf-import" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 上传源</button>
+          <button class="mh-btn" id="btn-mf-import-url" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ URL导入</button>
+          <button class="mh-btn" id="btn-mf-subscribe" style="height: 28px; padding: 0 10px; font-size: 13px; border-color: #8b5cf6; color: #8b5cf6;">➕ 订阅源</button>
+          <input type="file" id="mf-file-input" accept=".js,.json" style="display: none;">
+        </div>
+        <p class="desc" style="margin-bottom: 12px;">管理并更新您的 MusicFree 兼容插件源。</p>
+        <div id="mf-sources-list" style="border: 1px solid var(--md-outline-variant, #ccc); border-radius: 8px; background: var(--md-surface-1);">
+          <div style="padding: 20px; text-align: center; color: var(--md-on-surface-variant); font-size: 13px;">正在拉取...</div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="tab-resume" class="mh-pane"><div class="card">续播功能建设中，打算支持iWebPlayer和有声书的续播...</div></div>
+    <div id="tab-expert" class="mh-pane"><div class="card">语音触发指定URL功能，待开发...</div></div>
     <div id="tab-about" class="mh-pane">
       <div class="card">
         <div style="text-align: center; padding: 12px 0 0;">
@@ -415,7 +534,7 @@
           <div style="margin-top: 6px; font-size: 13px; color: var(--md-on-surface-variant); font-weight: 500;">
             智能音箱的语音口令扩展
           </div>
-          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.6.2</p>
+          <p class="desc" style="margin-top: 4px; font-size: 12px; opacity: 0.7;">SongLoft MIoT Helper v0.7.0</p>
         </div>
 
         <div class="mh-divider"></div>
@@ -714,6 +833,7 @@
 
   <script src="static/webdav.js"></script>
   <script src="static/lxmusic.js"></script>
+  <script src="static/musicfree.js"></script>
 
   <script>
   /* ==========================================
