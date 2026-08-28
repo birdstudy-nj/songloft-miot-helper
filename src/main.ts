@@ -3,6 +3,7 @@ import { jsonResponse, createRouter, parseQuery } from '@songloft/plugin-sdk';
 import type { HTTPRequest, HTTPResponse } from '@songloft/plugin-sdk';
 import { setupWebDAVRoutes, searchWebDavSongs } from './webdav';
 import { searchLxMusicSongs } from './lxmusic';
+import { searchMusicFreeSongs, searchMusicFreePlaylists } from './musicfree';
 
 const router = createRouter();
 let wsClient: any = null;
@@ -268,6 +269,8 @@ function playHitSound(accountId: string, deviceId: string) {
     })();
 }
 
+
+
 // ==========================================
 // 🧠 靶向智能纠错
 // ==========================================
@@ -453,9 +456,21 @@ async function rebuildVoiceRoutes() {
         voiceRoutes = {};
         const wdRaw = await songloft.storage.get('xiaoai_dav_configs');
         const lxRaw = await songloft.storage.get('xiaoai_lx_configs');
+        const mfRaw = await songloft.storage.get('xiaoai_mf_configs');
 
         let wdConfigs = [];
         let lxConfigs = [];
+        let mfConfigs: any[] = [];
+        if (!mfRaw || mfRaw === 'null' || mfRaw === '[]') {
+            mfConfigs = [
+                { engine: 'musicfree', type: 'search', node: 'default', quality: 'standard', strategy: 'first', isDefault: true, cmds: ['在线歌曲'] },
+                { engine: 'musicfree', type: 'play', node: 'default', quality: 'standard', strategy: 'first', isDefault: true, cmds: ['在线歌单'] }
+            ];
+            await safeStorageSet('xiaoai_mf_configs', JSON.stringify(mfConfigs));
+        } else {
+            try { mfConfigs = typeof mfRaw === 'string' ? JSON.parse(mfRaw) : mfRaw; } catch (e) {}
+            if (!Array.isArray(mfConfigs)) mfConfigs = [];
+        }
 
         if (!wdRaw || wdRaw === 'null' || wdRaw === '[]') {
             wdConfigs = [
@@ -497,7 +512,7 @@ async function rebuildVoiceRoutes() {
             if (added) await safeStorageSet('xiaoai_lx_configs', JSON.stringify(lxConfigs));
         }
 
-        const allConfigs = [...wdConfigs, ...lxConfigs];
+        const allConfigs = [...wdConfigs, ...lxConfigs, ...mfConfigs];
 
         for (const cfg of allConfigs) {
             // 🌟 拦截被禁用的口令组，如果设为 false 则直接跳过，不挂载到路由表
@@ -575,7 +590,7 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
             const zhCount = (ttsText.match(/[\u4e00-\u9fa5]/g) || []).length;
             const enWordCount = (ttsText.match(/[a-zA-Z0-9]+/g) || []).length;
             const totalSyllables = zhCount + (enWordCount * 2);
-            expectedTtsDelayMs = Math.ceil(totalSyllables / 4.5) * 1000 + 1500;
+            expectedTtsDelayMs = Math.ceil(totalSyllables / 4.5) * 1000;
 
             // ⚠️ 重点：这里直接 fetch 发送，不再 await 阻塞！
             // 让请求发出去后代码立刻往下走，实现"小爱说话"和"后台建单"双管齐下！
@@ -632,8 +647,10 @@ async function createPushPlaylistAndPlay(songs: any[], accountId: string, device
                 throw new Error(`LXMusic 歌曲导入失败 (HTTP ${importRes.status})`);
             }
 
-        } else if (engine === 'webdav') {
-            pushDebugLog(`🔗 [WebDAV通道] 正在向系统注册 ${songs.length} 首远程歌曲 (${songNames})...`);
+        } else if (engine === 'webdav' || engine === 'musicfree') {
+            const isMf = engine === 'musicfree';
+            pushDebugLog(`🔗 [${isMf ? 'MusicFree' : 'WebDAV'}通道] 正在向系统注册 ${songs.length} 首远程歌曲 (${songNames})...`);
+
             const regRes = await fetch(`${hostUrl}/api/v1/songs/remote`, { method: 'POST', headers, body: JSON.stringify(songs) });
             const songIds = ((await regRes.json()).songs || []).map((s: any) => s.id);
 
@@ -740,6 +757,70 @@ async function handleVoiceCommand(cmdType: string, engine: string, nodeName: str
             }
         } catch (e) {
             pushDebugLog(`⚠️ LXMusic 执行异常: ${e}`);
+            await playFailedSound(accountId, deviceId);
+        }
+        return;
+    }
+
+    // === MusicFree 处理分支 ===
+    if (engine === 'musicfree') {
+        let actualPlatform = nodeName;
+        let actualQuality = quality || 'standard';
+        let actualStrategy = strategy || 'first';
+        let effectiveLimit = (parsedLimit && parsedLimit > 0) ? parsedLimit : (cachedGlobalSettings.defaultLimit || 500);
+
+        if (nodeName === 'default') {
+            try {
+                const cfgRaw = await songloft.storage.get('musicfree_config');
+                const cfg = typeof cfgRaw === 'string' ? JSON.parse(cfgRaw) : (cfgRaw || {});
+                const settings = cfg.settings || {};
+
+                actualPlatform = String(settings.default_platform || 'default');
+                actualQuality = String(settings.default_quality || 'standard');
+                actualStrategy = String(settings.default_strategy || 'first');
+
+                pushDebugLog(`⚙️ MF触发全局默认策略: 源[${actualPlatform}], 音质[${actualQuality}], 策略[${actualStrategy}]`);
+            } catch (e) {
+                actualPlatform = 'default';
+                actualQuality = 'standard';
+                actualStrategy = 'first';
+            }
+        }
+
+        try {
+            let searchRes: { songs: any[], collectionName: string } | null = null;
+
+            if (cmdType === 'search') {
+                // 搜单曲
+                const songs = await searchMusicFreeSongs(actualPlatform, rawKeyword, actualQuality, effectiveLimit, pushDebugLog);
+                if (songs && songs.length > 0) {
+                    searchRes = { songs: songs, collectionName: "" };
+                }
+            } else if (cmdType === 'play') {
+                // 搜歌单
+                searchRes = await searchMusicFreePlaylists(actualPlatform, rawKeyword, actualQuality, actualStrategy, effectiveLimit, pushDebugLog);
+            } else {
+                pushDebugLog(`⚠️ MusicFree 尚不支持指令类型 [${cmdType}]，已中断`);
+                await playFailedSound(accountId, deviceId);
+                return;
+            }
+
+            if (searchRes === null || searchRes.songs.length === 0) {
+                pushDebugLog(`💀 未在 MusicFree 搜到关于 "${rawKeyword}" 的音乐，放弃操作`);
+                await playFailedSound(accountId, deviceId);
+            } else {
+                const songs = searchRes.songs;
+                const collectionName = searchRes.collectionName;
+
+                pushDebugLog(`🎉 MusicFree 成功集结 ${songs.length} 首歌曲！`);
+                let finalSongs = doShuffle && songs.length > 1 ? songs.slice().sort(() => Math.random() - 0.5) : songs;
+                if (doShuffle && songs.length > 1) pushDebugLog(`🎲 已开启随机播放，打乱 ${songs.length} 首歌曲顺序`);
+
+                // 送入大管家推流
+                await createPushPlaylistAndPlay(finalSongs, accountId, deviceId, 'musicfree', collectionName);
+            }
+        } catch (e) {
+            pushDebugLog(`⚠️ MusicFree 执行异常: ${e}`);
             await playFailedSound(accountId, deviceId);
         }
         return;
@@ -908,6 +989,7 @@ async function connectWebSocket() {
         wsClient = new WebSocket(wsUrl);
 
         wsClient.onopen = () => {
+            pushDebugLog('🔗 小爱对话监听通道已成功连接 (正常待命中)！');
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
@@ -1037,12 +1119,12 @@ router.post('/store', async (req) => {
             await updateGlobalSettingsCache();
         }
 
-        if (key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs') rebuildVoiceRoutes();
+        if (key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs' || key === 'xiaoai_mf_configs') rebuildVoiceRoutes();
 
         let syncKey = key;
         if (key === 'webdav_config') syncKey = 'iwebplayer.webdav';
 
-        if (key === 'webdav_config' || key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs' || key.startsWith('webdav_lib_')) {
+        if (key === 'webdav_config' || key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs' || key === 'xiaoai_mf_configs' || key.startsWith('webdav_lib_')) {
             songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", { type: 'config', key: syncKey, value: value }).catch(()=>{});
         }
         return jsonResponse({ ret: "OK" });
