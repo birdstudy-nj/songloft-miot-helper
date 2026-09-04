@@ -8,7 +8,7 @@
   let currentBrowserPath = '/';
 
   // ==========================================
-  // 模块 A：WebDAV 口令管理 (全聚合 JSON 极简版)
+  // 模块 A：WebDAV 口令管理
   // ==========================================
   let cmdConfigs = [];
 
@@ -54,26 +54,41 @@
       const box = document.createElement('div');
       box.className = 'mh-field'; box.id = containerId;
 
+      // 🌟 1. 纯净标题：动态生成，无视数据库里的冗长 cfg.label
+      let typeDesc = cfg.type === 'play' ? '播放歌单' : '播放歌曲';
+
       let badgeHtml = '';
-      if (!isDefault && (cfg.limit || cfg.shuffle || (cfg.enableFixedKeyword && cfg.fixedKeyword))) {
-          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center;">`;
-          if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
-          if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">乱序: 开启</span>`;
+      // 🌟 2. 渲染胶囊容器
+      if (!isDefault || cfg.limit || cfg.shuffle || (cfg.enableFixedKeyword && cfg.fixedKeyword)) {
+          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">`;
+
+          // 🌟 3. 节点胶囊：无前缀，纯文字 (例如: 我的NAS)
+          if (!isDefault) {
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${cfg.node}</span>`;
+          }
+
+          // WebDAV 没有音质和策略，直接渲染限制与乱序
+          if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
+          if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">乱序</span>`;
           if (cfg.enableFixedKeyword && cfg.fixedKeyword) {
               badgeHtml += `<span style="background: var(--md-primary); color: var(--md-on-primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">固定词: ${cfg.fixedKeyword}</span>`;
           }
+
           badgeHtml += `</div>`;
       }
 
+      // 🌟 4. 拼装标题行：纯净标题 + 各种胶囊 + 右侧徽章/按钮
       let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
-        <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">${cfg.label}</label>
+        <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">[${typeDesc}] 口令组</label>
         ${badgeHtml}`;
 
       if (!isDefault) {
         titleHtml += `<button class="mh-btn" style="height: 24px; padding: 0 10px; font-size: 12px; border-color: var(--md-outline); color: var(--md-on-surface-variant);" onclick="window._editCmdGroup('${cfg.type}', '${cfg.node}')">✏️ 编辑</button>`;
+      } else {
+        // 默认组，加上 [全局默认] 灰底色胶囊
+        titleHtml += `<span style="background: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">全局默认</span>`;
       }
       titleHtml += `</div>`;
-
       const placeholderText = cfg.type === 'play' ? '输入口令，如：网盘歌单' : '输入口令，如：网盘歌曲';
       const isEnabled = cfg.enabled !== false; // 默认启用
 
@@ -288,7 +303,7 @@
       renderAllCmdContainers();
   }
 
-  // ========== 其余 WebDAV 逻辑 ==========
+  // ========== 模块 B：核心无损合并逻辑 ==========
 
   async function getWebDavConfig() {
       const res = await apiGet('/store?key=webdav_config');
@@ -298,8 +313,97 @@
       return { settings: { mode: 'proxy', default_server: '' }, roots: {}, search_history: [] };
   }
 
-  async function saveWebDavConfig(cfg) {
-      await apiPost('/store', { key: 'webdav_config', value: JSON.stringify(cfg) });
+  // 🌟 统一调用的无损合并保存方法，防止破坏 iWebPlayer 的私有字段
+  async function saveWebDavConfigWithMerge(newFields) {
+      try {
+          const config = await getWebDavConfig();
+
+          if (newFields.settings) {
+              config.settings = { ...config.settings, ...newFields.settings };
+          }
+          if (newFields.roots) {
+              config.roots = { ...config.roots, ...newFields.roots };
+          }
+
+          if (newFields.roots === undefined) config.roots = {};
+
+          await apiPost('/store', { key: 'webdav_config', value: JSON.stringify(config) });
+      } catch (err) {
+          console.error("保存合并 WebDAV 配置失败:", err);
+      }
+  }
+
+  // ========== 模块 C：WebDAV 节点与扫库逻辑 ==========
+
+  // 🌟 全局锁：记录当前真正选中的节点，防网络竞态错乱
+  let currentActiveDavId = '';
+
+  // 🌟 统一接管：只要节点切换，全盘UI一起更新，只发 1 次请求！
+  async function switchDavNode(davId) {
+    if (!davId) {
+        document.getElementById('scan-stats-text').innerHTML = '暂无节点';
+        document.getElementById('btn-delete').style.display = 'none';
+        return;
+    }
+
+    currentActiveDavId = davId; // 拔枪上锁
+
+    // 1. 静默同步两个下拉框的 UI（不触发它们的 change 事件）
+    const masterSelect = document.getElementById('dav-master-select');
+    const configSelect = document.getElementById('dav-server-select');
+    if (masterSelect && masterSelect.value !== davId) masterSelect.value = davId;
+    if (configSelect && configSelect.value !== davId) configSelect.value = davId;
+
+    // 2. 🌟 仅仅请求 1 次后台配置！
+    const cfg = await getWebDavConfig();
+
+    // 防竞态拦截：如果慢请求回来时，用户又切了其他节点，直接丢弃！
+    if (currentActiveDavId !== davId) return;
+
+    // 3. 渲染上方区 (曲库索引与定时扫描)
+    document.getElementById('auto-scan-select').value = cfg.settings[`auto_scan_interval_${davId}`] || '0';
+    loadScanStats(davId); // 这里面去独立查当前曲库的统计数据
+
+    // 4. 渲染下方区 (节点配置与扫描目录)
+    const btnDel = document.getElementById('btn-delete');
+    const btnDef = document.getElementById('btn-set-default');
+
+    btnDel.style.display = 'inline-flex';
+    if (davId === defaultServerName) {
+        btnDef.style.opacity = '0.5';
+        btnDef.title = "已是默认节点";
+    } else {
+        btnDef.style.opacity = '1';
+        btnDef.title = "将此节点设为默认";
+    }
+
+    document.getElementById('dav-root-path').value = (cfg.roots && cfg.roots[davId]) ? cfg.roots[davId] : '/';
+    document.getElementById('dav-dir-browser').style.display = 'none';
+  }
+
+  let currentStatsDavId = '';
+
+  async function loadScanStats(davId) {
+    const textEl = document.getElementById('scan-stats-text');
+    if (!davId) { textEl.innerHTML = '暂无节点'; return; }
+    currentStatsDavId = davId;
+
+    try {
+      const res = await apiGet(`/store?key=${encodeURIComponent('webdav_lib_' + davId)}`);
+
+      // 拦截错乱的慢请求
+      if (currentStatsDavId !== davId) return;
+
+      if (res && res.data && res.data !== 'null') {
+          const stats = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+          textEl.innerHTML = `包含 <b>${stats.folders || 0}</b> 个歌单，共 <b>${stats.songs || 0}</b> 首歌曲 <span style="opacity:0.7; margin-left:8px;">(上次扫描: ${stats.time || '未知'})</span>`;
+      } else {
+          textEl.innerHTML = `尚未建立索引，请点击下方建立`;
+      }
+    } catch(e) {
+      if (currentStatsDavId !== davId) return;
+      textEl.innerHTML = `暂无索引数据`;
+    }
   }
 
   async function loadDavServers() {
@@ -332,41 +436,23 @@
       });
 
       if (defaultServerName && currentDavServers.find(s => s.name === defaultServerName)) {
-        masterSelect.value = defaultServerName; configSelect.value = defaultServerName;
-      }
-      onMasterSelect(); onConfigSelect();
-    } catch (e) { console.warn("拉取节点失败:", e); }
-  }
-
-  async function onMasterSelect() {
-    const val = document.getElementById('dav-master-select').value;
-    if (!val) return;
-    const cfg = await getWebDavConfig();
-    document.getElementById('auto-scan-select').value = cfg.settings[`auto_scan_interval_${val}`] || '0';
-    loadScanStats(val);
-  }
-
-  async function loadScanStats(davId) {
-    const textEl = document.getElementById('scan-stats-text');
-    if (!davId) { textEl.innerHTML = '暂无节点'; return; }
-    try {
-      const res = await apiGet(`/store?key=${encodeURIComponent('webdav_lib_' + davId)}`);
-      if (res && res.data && res.data !== 'null') {
-          const stats = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-          textEl.innerHTML = `包含 <b>${stats.folders || 0}</b> 个歌单，共 <b>${stats.songs || 0}</b> 首歌曲 <span style="opacity:0.7; margin-left:8px;">(上次扫描: ${stats.time || '未知'})</span>`;
+        switchDavNode(defaultServerName);
+      } else if (currentDavServers.length > 0) {
+        switchDavNode(currentDavServers[0].name); // 如果没有默认节点，默认切到第一个
       } else {
-          textEl.innerHTML = `尚未建立索引，请点击下方建立`;
+        switchDavNode('');
       }
-    } catch(e) { textEl.innerHTML = `暂无索引数据`; }
+    } catch (e) { console.warn("拉取节点失败:", e); }
   }
 
   async function onAutoScanChange() {
     const val = document.getElementById('dav-master-select').value;
     const hours = document.getElementById('auto-scan-select').value;
     if (!val) return;
+
     const cfg = await getWebDavConfig();
     cfg.settings[`auto_scan_interval_${val}`] = hours;
-    await saveWebDavConfig(cfg);
+    await saveWebDavConfigWithMerge(cfg);
   }
 
   async function triggerScan(eventOrDavId) {
@@ -379,7 +465,7 @@
         const masterSelect = document.getElementById('dav-master-select');
         if (masterSelect.value !== davId) {
             masterSelect.value = davId;
-            onMasterSelect();
+            switchDavNode(davId);
         }
     }
 
@@ -394,24 +480,19 @@
     apiGet('/dav/status').then(res => {
       const textEl = document.getElementById('scan-status');
       const davId = document.getElementById('dav-master-select').value;
-      if (res.status === 'scanning') { textEl.innerText = `⏳ 正在全量扫描网盘... 已发现 ${res.scanned_folders} 个带音乐的文件夹，请耐心等待`; setTimeout(pollScanStatus, 3000); }
-      else if (res.status === 'completed') { textEl.innerText = `✅ 扫库完成！数据已落盘并成功广播。`; loadScanStats(davId); }
-      else textEl.innerText = `❌ 扫库任务异常或中止`;
+      if (res.status === 'scanning') {
+          textEl.innerText = `⏳ 正在全量扫描网盘... 已发现 ${res.scanned_folders} 个带音乐的文件夹，请耐心等待`;
+          setTimeout(pollScanStatus, 3000);
+      }
+      else if (res.status === 'completed') {
+          // 🌟 扫库完成后直接清空文字
+          textEl.innerText = '';
+          loadScanStats(davId);
+      }
+      else {
+          textEl.innerText = `❌ 扫库任务异常或中止`;
+      }
     });
-  }
-
-  async function onConfigSelect() {
-    const val = document.getElementById('dav-server-select').value;
-    const btnDel = document.getElementById('btn-delete');
-    const btnDef = document.getElementById('btn-set-default');
-
-    if (!val) { btnDel.style.display = 'none'; return; }
-    btnDel.style.display = 'inline-flex';
-    if (val === defaultServerName) { btnDef.style.opacity = '0.5'; btnDef.title = "已是默认节点"; } else { btnDef.style.opacity = '1'; btnDef.title = "将此节点设为默认"; }
-
-    const cfg = await getWebDavConfig();
-    document.getElementById('dav-root-path').value = (cfg.roots && cfg.roots[val]) ? cfg.roots[val] : '/';
-    document.getElementById('dav-dir-browser').style.display = 'none';
   }
 
   async function renderDirBrowser(path) {
@@ -440,14 +521,22 @@
       if (dirs.length === 0) listEl.innerHTML = '<li style="padding: 14px; text-align: center; color: var(--md-on-surface-variant); font-size: 13px;">该目录下无子文件夹</li>';
       else {
         dirs.forEach(d => {
+          // 🌟 智能兜底：如果 name 为空，从 id (路径) 中提取最后一段作为展示用的文件夹名
+          const dName = d.name || (d.id ? d.id.split('/').filter(Boolean).pop() : '') || '未知目录';
+
           const li = document.createElement('li');
           li.style.cssText = 'padding: 12px 14px; border-bottom: 1px solid var(--md-outline-variant); font-size: 14px; color: var(--md-on-surface); cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.2s;';
           li.onmouseover = () => li.style.background = 'var(--md-surface-variant)';
           li.onmouseout = () => li.style.background = 'transparent';
-          li.innerHTML = `📁 <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${d.name}</span>`;
+
+          // 🌟 使用兜底后的 dName 渲染
+          li.innerHTML = `📁 <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${dName}</span>`;
+
           li.addEventListener('click', () => {
-            const nextPath = path === '/' ? '/' + d.name : path + '/' + d.name;
-            currentBrowserPath = nextPath; renderDirBrowser(nextPath);
+            // 🌟 优先直接使用自带绝对路径的 d.id，否则拼接 dName
+            const nextPath = d.id || (path === '/' ? '/' + dName : path + '/' + dName);
+            currentBrowserPath = nextPath;
+            renderDirBrowser(nextPath);
           });
           listEl.appendChild(li);
         });
@@ -480,22 +569,56 @@
 
     toggleForm(false);
     await loadDavServers();
-    triggerScan(payload.name);
+
+    // 🌟 一句话，直接切到新节点！
+    switchDavNode(payload.name);
+
+    setTimeout(() => {
+        alert(`✅ 节点 [${payload.name}] 添加成功！\n\n💡 接下来请在下方的【扫库根目录配置】中点击“选择”按钮，定位到存放音乐的文件夹，选好后系统会自动开始建库扫描。`);
+    }, 50);
   }
+
+  // 🌟 终极物理删除节点与清扫逻辑
   async function deleteServer() {
     const val = document.getElementById('dav-server-select').value;
-    if (!val || !confirm(`确定删除 [${val}] 吗？`)) return;
+    if (!val || !confirm(`确定彻底删除 [${val}] 节点及相关曲库吗？`)) return;
+
+    // 1. 调用底层接口删除网盘
     await fetch(`/api/v1/jsplugin/dav/lists/${encodeURIComponent(val)}`, { method: 'DELETE', headers: getHeaders() });
 
+    // 2. 清理配置文件残留
     const cfg = await getWebDavConfig();
     let changed = false;
+
     if (cfg.settings.default_server === val) { cfg.settings.default_server = ''; changed = true; }
     if (cfg.roots && cfg.roots[val]) { delete cfg.roots[val]; changed = true; }
-    if (cfg.settings[`auto_scan_interval_${val}`]) { delete cfg.settings[`auto_scan_interval_${val}`]; changed = true; }
 
-    if (changed) await saveWebDavConfig(cfg);
+    if (cfg.settings) {
+        if (cfg.settings[`auto_scan_interval_${val}`] !== undefined) {
+            delete cfg.settings[`auto_scan_interval_${val}`];
+            changed = true;
+        }
+        if (cfg.settings[`last_scan_time_${val}`] !== undefined) {
+            delete cfg.settings[`last_scan_time_${val}`];
+            changed = true;
+        }
+    }
 
-    alert('✅ 节点已删除'); loadDavServers();
+    if (changed) {
+        // 直接使用完整替换，因为上面已经清扫干净了
+        await apiPost('/store', { key: 'webdav_config', value: JSON.stringify(cfg) });
+    }
+
+    // 3. 物理删除底层的索引曲库文件 (并触发 IPC 删除广播给播放器)
+    try {
+        await fetch(`/api/v1/jsplugin/miot-helper/store?key=webdav_lib_${encodeURIComponent(val)}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+        });
+    } catch(e) {}
+
+    alert('✅ 节点已删除及曲库清理完成！');
+    loadDavServers();
   }
 
   async function testServer() {
@@ -517,7 +640,7 @@
 
     const cfg = await getWebDavConfig();
     cfg.settings.default_server = val;
-    await saveWebDavConfig(cfg);
+    await saveWebDavConfigWithMerge(cfg);
     loadDavServers();
   }
 
@@ -530,8 +653,10 @@
     const mask = document.getElementById('cmd-modal-mask');
     if (mask) mask.addEventListener('click', (e) => { if (e.target === mask) hideCmdModal(); });
 
-    document.getElementById('dav-master-select').addEventListener('change', onMasterSelect);
-    document.getElementById('dav-server-select').addEventListener('change', onConfigSelect);
+    // 🌟 统一路由给调度枢纽
+    document.getElementById('dav-master-select').addEventListener('change', (e) => switchDavNode(e.target.value));
+    document.getElementById('dav-server-select').addEventListener('change', (e) => switchDavNode(e.target.value));
+
     document.getElementById('auto-scan-select').addEventListener('change', onAutoScanChange);
     document.getElementById('btn-trigger-scan').addEventListener('click', triggerScan);
 
@@ -567,7 +692,7 @@
 
         if (oldPath !== currentBrowserPath) {
             cfg.roots[val] = currentBrowserPath;
-            await saveWebDavConfig(cfg);
+            await saveWebDavConfigWithMerge(cfg);
             triggerScan(val);
         } else {
             alert(`✅ 根目录未改变，无需重新扫描`);

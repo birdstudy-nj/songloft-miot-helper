@@ -69,28 +69,45 @@
       const box = document.createElement('div');
       box.className = 'mh-field'; box.id = `lx-cmd-box-${mapKey}`;
 
+      // 🌟 保留你原有的所有 Map 字典，绝不删除
       const platMap = { wy: '网易云音乐', tx: 'QQ音乐', kg: '酷狗音乐', kw: '酷我音乐', mg: '咪咕音乐' };
       const stratMap = { first: '默认首个', random: '随机挑选', play_count: '热度优先', total: '数量优先' };
-      // 🌟 修改：精准映射所有类型
       const typeNameMap = { play: '歌单', search: '歌曲', singer: '歌手', album: '专辑', rank: '榜单' };
       const typeName = typeNameMap[cfg.type] || '歌曲';
 
-      let labelText = ''; let badgeHtml = '';
+      // 🌟 1. 统一纯净标题：全量改为 [播放xxx]
+      let labelText = `[播放${typeName}] 口令组`;
 
-      if (cfg.isDefault) {
-          labelText = `搜索 LXMusic ${typeName}口令(默认配置)`;
-      } else {
-          const platName = platMap[cfg.node] || cfg.node;
-          labelText = `搜${platName}${typeName}`; // 去掉了 [定制]
+      let badgeHtml = '';
+      if (!cfg.isDefault || cfg.limit || cfg.shuffle || (cfg.enableFixedKeyword && cfg.fixedKeyword)) {
+          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">`;
 
-          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center;">`;
-          badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">音质: ${cfg.quality || '320k'}</span>`;
-          if (cfg.type === 'play') badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">策略: ${stratMap[cfg.strategy] || '默认'}</span>`;
-          if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
-          if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: normal; color: var(--md-on-surface-variant);">乱序: 开启</span>`;
+          if (!cfg.isDefault) {
+              const shortPlatMap = { wy: '网易云', tx: 'QQ音乐', kg: '酷狗', kw: '酷我', mg: '咪咕' };
+              const platName = shortPlatMap[cfg.node] || cfg.node;
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${platName}</span>`;
+          }
+
+          if (!cfg.isDefault && cfg.quality) {
+              let qText = cfg.quality;
+              if (qText === 'flac') qText = '无损';
+              else if (qText === '320k') qText = '高品质';
+              else if (qText === '128k') qText = '标准';
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${qText}</span>`;
+          }
+
+          // 🌟 2. 放宽策略胶囊条件：只要是歌单就显示！没有旧数据就兜底用 'first'，去掉了"策略:"
+          if (!cfg.isDefault && cfg.type === 'play') {
+              const sText = stratMap[cfg.strategy || 'first'] || '默认首个';
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${sText}</span>`;
+          }
+
+          if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
+          if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">乱序</span>`;
           if (cfg.enableFixedKeyword && cfg.fixedKeyword) {
               badgeHtml += `<span style="background: var(--md-primary); color: var(--md-on-primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">固定词: ${cfg.fixedKeyword}</span>`;
           }
+
           badgeHtml += `</div>`;
       }
 
@@ -100,6 +117,8 @@
 
       if (!cfg.isDefault) {
           titleHtml += `<button class="mh-btn" style="height: 24px; padding: 0 10px; font-size: 12px; border-color: var(--md-outline); color: var(--md-on-surface-variant);" onclick="window._editLxCmdGroup('${cfg.type}', '${cfg.node}')">✏️ 编辑</button>`;
+      } else {
+          titleHtml += `<span style="background: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">全局默认</span>`;
       }
       titleHtml += `</div>`;
 
@@ -107,12 +126,10 @@
 
       box.innerHTML = `
         ${titleHtml}
-        <!-- 👇 将口令胶囊容器和开关放在同一个 flex 行内，开关居右 -->
         <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
           <div id="lx-tags-${mapKey}" class="mh-tag-container" style="flex: 1; margin-bottom: 0; transition: opacity 0.2s;"></div>
           <input type="checkbox" id="lx-enable-${mapKey}" class="mh-switch-input" ${isEnabled ? 'checked' : ''} style="margin-top: 2px; flex-shrink: 0;" title="启用/停用此组">
         </div>
-        <!-- 👇 输入框和添加按钮单独在下面一行 -->
         <div id="lx-input-area-${mapKey}" style="display: flex; gap: 12px; align-items: center; transition: opacity 0.2s;">
           <input type="text" id="lx-input-${mapKey}" class="mh-input" placeholder="输入口令，如：全网${typeName}">
           <button class="mh-btn" id="lx-btn-add-${mapKey}">➕ 口令</button>
@@ -123,7 +140,6 @@
       document.getElementById(`lx-btn-add-${mapKey}`).addEventListener('click', () => addLxCmd(cfg.type, cfg.node));
       document.getElementById(`lx-input-${mapKey}`).addEventListener('keypress', (e) => { if (e.key === 'Enter') addLxCmd(cfg.type, cfg.node); });
 
-      // 获取当前项的开关、标签容器和输入框区域
       const toggleEl = document.getElementById(`lx-enable-${mapKey}`);
       const tagsEl = document.getElementById(`lx-tags-${mapKey}`);
       const inputArea = document.getElementById(`lx-input-area-${mapKey}`);
@@ -131,12 +147,10 @@
       const updateUiState = (enabled) => {
           const opacity = enabled ? '1' : '0.4';
           const ptrEvents = enabled ? 'auto' : 'none';
-          // 开关已经在外面了，现在可以直接让整个胶囊区和输入区变灰禁用
           if (tagsEl) { tagsEl.style.opacity = opacity; tagsEl.style.pointerEvents = ptrEvents; }
           if (inputArea) { inputArea.style.opacity = opacity; inputArea.style.pointerEvents = ptrEvents; }
       };
 
-      // 初始渲染时置灰
       updateUiState(cfg.enabled !== false);
 
       toggleEl?.addEventListener('change', async (e) => {
@@ -290,14 +304,7 @@
               <input type="checkbox" class="lx-toggle-source" data-id="${src.id}" ${src.enabled ? 'checked' : ''}>
               <span class="lx-slider"></span>
             </label>
-            <button class="mh-source-del-btn btn-delete-lx-source" data-id="${src.id}" title="删除此源">
-              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                <line x1="10" y1="11" x2="10" y2="17"></line>
-                <line x1="14" y1="11" x2="14" y2="17"></line>
-              </svg>
-            </button>
+            <button class="mh-source-del-btn btn-delete-lx-source" data-id="${src.id}" title="删除此源">🗑️</button>
           </div>
         </div>
         `;

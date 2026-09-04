@@ -138,20 +138,43 @@
       const box = document.createElement('div');
       box.className = 'mh-field'; box.id = `cmd-box-${mapKey}`;
 
-      let typeDesc = cfg.type === 'search' ? '搜索歌曲' : '搜索歌单';
-      let nodeDesc = cfg.node === 'default' ? '默认' : cfg.node;
+      // 🌟 1. 改为 [播放xxx]
+      let typeDesc = cfg.type === 'search' ? '播放歌曲' : '播放歌单';
 
       let badgeHtml = '';
-      if (!cfg.isDefault && (cfg.limit || cfg.shuffle || (cfg.enableFixedKeyword && cfg.fixedKeyword))) {
-          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center;">`;
+      if (!cfg.isDefault || cfg.limit || cfg.shuffle || (cfg.enableFixedKeyword && cfg.fixedKeyword)) {
+          badgeHtml = `<div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">`;
+
+          if (!cfg.isDefault) {
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${cfg.node}</span>`;
+          }
+
+          if (!cfg.isDefault && cfg.quality) {
+              let qText = cfg.quality;
+              if (qText === 'high') qText = '无损';
+              else if (qText === 'standard') qText = '高品质';
+              else if (qText === 'low') qText = '标准';
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${qText}</span>`;
+          }
+
+          // 🌟 2. 放宽策略胶囊条件：只要是歌单就显示！没有旧数据就兜底用 'first'
+          if (!cfg.isDefault && cfg.type === 'play') {
+              const stratMap = { first: '默认首个', random: '随机抽取', play_count: '热度优先', total: '数量优先' };
+              const sText = stratMap[cfg.strategy || 'first'] || '默认首个';
+              badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">${sText}</span>`;
+          }
+
           if (cfg.limit) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">限制: ${cfg.limit}首</span>`;
           if (cfg.shuffle) badgeHtml += `<span style="border: 1px solid var(--md-outline-variant); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--md-on-surface-variant);">乱序</span>`;
-          if (cfg.enableFixedKeyword && cfg.fixedKeyword) badgeHtml += `<span style="background: var(--md-primary); color: var(--md-on-primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">固定词: ${cfg.fixedKeyword}</span>`;
+          if (cfg.enableFixedKeyword && cfg.fixedKeyword) {
+              badgeHtml += `<span style="background: var(--md-primary); color: var(--md-on-primary); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">固定词: ${cfg.fixedKeyword}</span>`;
+          }
+
           badgeHtml += `</div>`;
       }
 
       let titleHtml = `<div style="display: flex; justify-content: flex-start; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
-        <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">[${typeDesc}] 口令组 (${nodeDesc})</label>
+        <label style="margin-bottom: 0; color: var(--md-on-surface); font-weight: bold;">[${typeDesc}] 口令组</label>
         ${badgeHtml}`;
 
       if (!cfg.isDefault) {
@@ -259,6 +282,7 @@
       document.getElementById('btn-mf-cmd-delete').style.display = 'none';
 
       document.getElementById('modal-mf-cmd-type').value = 'search';
+      document.getElementById('modal-mf-cmd-type').dispatchEvent(new Event('change'));
       document.getElementById('modal-mf-cmd-node').value = 'default';
       document.getElementById('modal-mf-cmd-quality').value = 'standard';
       document.getElementById('modal-mf-cmd-strategy').value = 'first';
@@ -282,6 +306,7 @@
       document.getElementById('btn-mf-cmd-delete').style.display = 'inline-flex';
 
       document.getElementById('modal-mf-cmd-type').value = cfg.type || 'search';
+      document.getElementById('modal-mf-cmd-type').dispatchEvent(new Event('change'));
       document.getElementById('modal-mf-cmd-node').value = cfg.node || 'default';
       document.getElementById('modal-mf-cmd-quality').value = cfg.quality || 'standard';
       document.getElementById('modal-mf-cmd-strategy').value = cfg.strategy || 'first';
@@ -486,10 +511,21 @@
       await loadMfGlobalSettings();
       loadMfCmds();
 
+      // 监听功能类型的切换，动态显示/隐藏策略下拉框
+      const mfModalType = document.getElementById('modal-mf-cmd-type');
+      const mfStratField = document.getElementById('mf-strategy-field');
+
+      mfModalType?.addEventListener('change', (e) => {
+          if (e.target.value === 'play') {
+              mfStratField.style.display = 'block';
+          } else {
+              mfStratField.style.display = 'none';
+          }
+      });
+
       ['mf-def-platform', 'mf-def-quality', 'mf-def-strategy'].forEach(id => {
           document.getElementById(id)?.addEventListener('change', saveMfGlobalSettings);
       });
-
       document.getElementById('btn-mf-import-url')?.addEventListener('click', importMfSourceUrl);
 
       document.getElementById('btn-mf-import')?.addEventListener('click', () => {

@@ -64,7 +64,6 @@
     .chip, .mh-tag {
       display: inline-flex; align-items: center; gap: 6px;
       height: 28px; padding: 0 12px;
-      /* 🌟 删掉原来的 #D6E3FF，换成下面的全动态变量 */
       background: var(--md-primary-container);
       color: var(--md-on-primary-container);
       border-radius: 6px;
@@ -79,7 +78,7 @@
     .mh-tag-close { cursor: pointer; color: var(--md-error); font-weight: bold; line-height: 1; margin-left: 2px; }
     .mh-tag-close:hover { opacity: 0.7; transform: scale(1.1); }
 
-    /* 🌟 全局通用的滑动开关样式 (兼容 LXMusic 源列表和独立开关) */
+    /* 全局通用的滑动开关样式 */
     #lx-sources-list input[type="checkbox"], .mh-switch-input {
       appearance: none; -webkit-appearance: none;
       position: relative; width: 40px; height: 20px;
@@ -102,25 +101,18 @@
       transform: translateX(20px);
     }
 
-    /* ==========================================
-       🌙 仅暗黑模式生效：LXMusic 源列表颜色同步口令胶囊
-       ========================================== */
+    /* 仅暗黑模式生效 */
     @media (prefers-color-scheme: dark) {
-      /* 1. 外层大方框：使用深蓝色，并锁死圆角防止内部溢出 */
       #lx-sources-list {
         background: var(--md-primary-container) !important;
         color: var(--md-on-primary-container) !important;
         overflow: hidden !important;
       }
-
-      /* 2. 内部生成的源卡片：背景透明，文字颜色对齐，彻底融入深蓝背景 */
       #lx-sources-list > div,
       #lx-sources-list [style*="background"] {
         background: transparent !important;
         color: var(--md-on-primary-container) !important;
       }
-
-      /* 3. 🌟 修复：把删除按钮从透明规则里“救”出来，恢复危险色底色 */
       #lx-sources-list .mh-source-del-btn {
         background: var(--md-error-container, #ffdad6) !important;
         color: var(--md-error, #ba1a1a) !important;
@@ -132,9 +124,9 @@
       appearance: none; -webkit-appearance: none;
       display: inline-flex !important; align-items: center; justify-content: center; gap: 4px;
       height: 28px; padding: 0 10px; margin-left: 10px;
-      background: var(--md-error-container, #ffdad6) !important; /* 默认淡浅红底色 */
+      background: var(--md-error-container, #ffdad6) !important;
       color: var(--md-error, #ba1a1a) !important;
-      border: 1px solid rgba(186, 26, 26, 0.25) !important; /* 淡色柔和边框 */
+      border: 1px solid rgba(186, 26, 26, 0.25) !important;
       border-radius: 6px !important;
       font-size: 12px !important; font-weight: 500; font-family: inherit;
       cursor: pointer !important; white-space: nowrap; line-height: 1;
@@ -142,11 +134,11 @@
       box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }
     .mh-source-del-btn:hover {
-      background: rgba(186, 26, 26, 0.2) !important; /* 鼠标悬浮时底色稍微加深 */
+      background: rgba(186, 26, 26, 0.2) !important;
       border-color: rgba(186, 26, 26, 0.4) !important;
     }
 
-    /* 🌟 带有微阴影的模块分割线 */
+    /* 带有微阴影的模块分割线 */
     .mh-divider {
       height: 1px;
       background: var(--md-outline-variant);
@@ -157,9 +149,7 @@
 
     @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-    /* ==========================================
-       布局适配与居中限制 (最大宽度 800px)
-       ========================================== */
+    /* 布局适配 */
     .app-bar {
       max-width: 800px; margin: 0 auto;
       left: 0 !important; right: 0 !important;
@@ -168,13 +158,9 @@
       max-width: 800px; margin: 0 auto;
       padding-top: 76px; padding-bottom: 40px;
     }
-    html.embed .main-content {
-      padding-top: 16px;
-    }
+    html.embed .main-content { padding-top: 16px; }
 
-    /* ==========================================
-       统一大背景板与区块设计
-       ========================================== */
+    /* 统一大背景板与区块设计 */
     .mh-pane {
       display: none;
       position: relative;
@@ -186,22 +172,17 @@
       animation: fadeIn 0.3s ease;
     }
     .mh-pane.active { display: block; }
-    /* ==========================================
-       🌟 插件禁用毛玻璃遮罩 (动态渲染)
-       ========================================== */
+
+    /* 插件禁用毛玻璃遮罩 */
     .plugin-disabled-mask {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      /* 👇 在这里修改透明度：0.2 越小越透明；blur(4px) 越小越清晰 */
       background: rgba(255, 255, 255, 0.2);
       backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
       z-index: 50; display: flex; flex-direction: column;
       justify-content: center; align-items: center; text-align: center;
       padding: 20px; box-sizing: border-box;
     }
-    @media (prefers-color-scheme: dark) {
-      /* 👇 暗黑模式下的透明度 (0.3 越小越透明) */
-      .plugin-disabled-mask { background: rgba(0, 0, 0, 0.3); }
-    }
+    @media (prefers-color-scheme: dark) { .plugin-disabled-mask { background: rgba(0, 0, 0, 0.3); } }
     .plugin-disabled-card {
       background: var(--md-surface, #ffffff);
       padding: 32px; border-radius: var(--md-radius-lg, 16px);
@@ -211,7 +192,6 @@
       animation: fadeIn 0.3s ease;
     }
 
-    /* 区块附带微弱底阴影 */
     .card {
       padding: 24px 32px;
       background: transparent; border: none;
@@ -233,25 +213,13 @@
       animation: fadeIn 0.2s ease;
     }
 
-    /* ==========================================
-       标签栏与悬浮箭头
-       ========================================== */
+    /* 标签栏与悬浮箭头 */
     .tabs-container-wrap {
-      position: sticky;
-      /* 🌟 核心：避开上方 56px 高度的蓝条 app-bar */
-      top: 56px;
-      /* 🌟 层级设为 90，保证压住下方内容，但不遮挡上方层级为 100 的蓝条 */
-      z-index: 90;
-      background: var(--md-surface, #ffffff);
-      margin-bottom: 20px;
-      border-bottom: 1px solid var(--md-outline-variant);
-      padding-top: 10px;
+      position: sticky; top: 56px; z-index: 90;
+      background: var(--md-surface, #ffffff); margin-bottom: 20px;
+      border-bottom: 1px solid var(--md-outline-variant); padding-top: 10px;
     }
-
-    /* 🌟 补充补丁：如果是在嵌入模式下（宿主会自动隐藏 app-bar 蓝条），则正常在 0px 吸顶 */
-    html.embed .tabs-container-wrap {
-      top: 0;
-    }
+    html.embed .tabs-container-wrap { top: 0; }
     .mh-tabs {
       display: flex; gap: 4px; overflow-x: auto; white-space: nowrap;
       scrollbar-width: none; margin-bottom: -1px; scroll-behavior: smooth; padding: 0 40px 0 20px;
@@ -350,11 +318,9 @@
         </div>
       </div>
 
-      <!-- 👇 🌟 高阶 NLP 胶囊设置区块 -->
       <div class="card" style="margin-top: 12px;">
         <div class="card-title" style="margin-bottom: 12px;">🗣️ 语音高阶词汇定制 (NLP)</div>
 
-        <!-- 🌟 1. 乱序洗牌区块改造 -->
         <div class="mh-field">
           <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 8px;">获取到的歌曲乱序洗牌 (默认不打乱)</label>
           <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; justify-content: space-between;">
@@ -376,7 +342,6 @@
           <div style="font-size: 11px; color: var(--md-on-surface-variant); margin-top: 4px;">如果语音指令未指定具体数量，默认获取数量不超过该值。</div>
         </div>
 
-        <!-- 🌟 2. 数量截取前后缀区块改造-->
         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
             <div class="mh-field" style="flex: 1; min-width: 150px; margin-bottom: 0;">
               <label style="font-weight: bold; color: var(--md-on-surface); margin-bottom: 8px;">数量截取前缀(非必须)</label>
@@ -407,7 +372,6 @@
 
 
     <div id="tab-musicfree" class="mh-pane">
-      <!-- 🌟 1. 口令设置区块 -->
       <div class="card">
         <div style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
           <div class="card-title" style="margin: 0;">🎙️ 小爱口令设置 (MusicFree)</div>
@@ -420,8 +384,8 @@
             <div class="mh-field">
               <label>功能类型</label>
               <select id="modal-mf-cmd-type" class="mh-select">
-                <option value="search">搜索歌曲</option>
-                <option value="play">搜索歌单 (待开发)</option>
+                <option value="search">播放 MusicFree 歌曲口令</option>
+                <option value="play">播放 MusicFree 歌单口令</option>
               </select>
             </div>
             <div class="mh-field">
@@ -433,13 +397,13 @@
             <div class="mh-field">
               <label>期望最高音质</label>
               <select id="modal-mf-cmd-quality" class="mh-select">
-                <option value="high">无损/极高 (high)</option>
-                <option value="standard" selected>高品质 (standard)</option>
-                <option value="low">标准 (low)</option>
+                <option value="high">无损(FLAC)</option>
+                <option value="standard" selected>高品质(320K)</option>
+                <option value="low">标准(128K)</option>
               </select>
             </div>
-            <div class="mh-field" id="mf-strategy-field">
-              <label>歌单决选策略 (暂作保留)</label>
+            <div class="mh-field" id="mf-strategy-field" style="display: none;">
+              <label>歌单决选策略</label>
               <select id="modal-mf-cmd-strategy" class="mh-select">
                 <option value="first">默认首个</option><option value="random">随机抽取</option><option value="play_count">热度优先</option><option value="total">数量优先</option>
               </select>
@@ -481,7 +445,6 @@
         <div id="mf-cmd-containers"></div>
       </div>
 
-      <!-- 🌟 2. 全局默认偏好区块 -->
       <div class="card">
         <div class="card-title" style="margin-bottom: 12px;">🌟 全局默认配置偏好</div>
         <p class="desc" style="margin-bottom: 16px;">配置的参数将作为上方“默认配置”口令触发时的执行策略。</p>
@@ -495,7 +458,7 @@
           <div class="mh-field" style="flex: 1; min-width: 150px;">
             <label>默认最高音质</label>
             <select id="mf-def-quality" class="mh-select">
-              <option value="high">无损/极高 (high)</option><option value="standard" selected>高品质 (standard)</option><option value="low">标准 (low)</option>
+              <option value="high">无损(FLAC)</option><option value="standard" selected>高品质(320K)</option><option value="low">标准(128K)</option>
             </select>
           </div>
           <div class="mh-field" style="flex: 1; min-width: 150px;">
@@ -507,7 +470,6 @@
         </div>
       </div>
 
-      <!-- 🌟 3. 源管理区块 -->
       <div class="card">
         <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
           <span>⚙️ MusicFree 源脚本管理</span>
@@ -597,11 +559,11 @@
             <div class="mh-field">
               <label>功能类型</label>
               <select id="modal-lx-cmd-type" class="mh-select">
-                <option value="play">搜索歌单</option>
-                <option value="search">搜索歌曲</option>
-                <option value="singer">搜索歌手</option>
-                <option value="album">搜索专辑</option>
-                <option value="rank">搜索榜单</option>
+                <option value="play">播放 LXMusic 歌单口令</option>
+                <option value="search">播放 LXMusic 歌曲口令</option>
+                <option value="singer">播放 LXMusic 歌手口令</option>
+                <option value="album">播放 LXMusic 专辑口令</option>
+                <option value="rank">播放 LXMusic 榜单口令</option>
               </select>
             </div>
             <div class="mh-field">
@@ -613,7 +575,9 @@
             <div class="mh-field">
               <label>期望最高音质 (自动降级)</label>
               <select id="modal-lx-cmd-quality" class="mh-select">
-                <option value="flac">无损 FLAC</option><option value="320k" selected>高品质 320k</option><option value="128k">标准 128k</option>
+                <option value="flac">无损(FLAC)</option>
+                <option value="320k" selected>高品质(320K)</option>
+                <option value="128k">标准(128K)</option>
               </select>
             </div>
             <div class="mh-field" id="lx-strategy-field">
@@ -672,7 +636,7 @@
           <div class="mh-field" style="flex: 1; min-width: 150px;">
             <label>默认最高音质</label>
             <select id="lx-def-quality" class="mh-select">
-              <option value="flac">无损 FLAC</option><option value="320k" selected>高品质 320k</option><option value="128k">标准 128k</option>
+              <option value="flac">无损(FLAC)</option><option value="320k" selected>高品质(320K)</option><option value="128k">标准(128K)</option>
             </select>
           </div>
           <div class="mh-field" style="flex: 1; min-width: 150px;">
@@ -692,7 +656,7 @@
           <input type="file" id="lx-file-input" accept=".js" style="display: none;">
         </div>
         <p class="desc" style="margin-bottom: 12px;">导入 LXMusic 兼容的源脚本以解锁全网搜索功能。</p>
-        <div id="lx-sources-list" style="border: 1px solid var(--md-outline-variant, #ccc); border-radius: 8px; background: #D6E3FF;">
+        <div id="lx-sources-list" style="border: 1px solid var(--md-outline-variant, #ccc); border-radius: 8px; background: var(--md-surface-1);">
           <div style="padding: 20px; text-align: center; color: var(--md-on-surface-variant); font-size: 13px;">正在拉取...</div>
         </div>
       </div>
@@ -759,7 +723,8 @@
       <div class="card">
         <div class="card-title" style="margin-bottom: 16px;">🔄 曲库索引与定时扫描</div>
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
-          <select id="dav-master-select" class="mh-select" style="width: auto; min-width: 120px; height: 32px; padding: 2px 8px; margin: 0; background: transparent; font-weight: bold; color: var(--md-primary); border-color: var(--md-primary);"></select>
+          <!-- 🌟 修复 1：将 background: transparent 改为 background-color: transparent 且补足 padding -->
+          <select id="dav-master-select" class="mh-select" style="width: auto; min-width: 120px; height: 32px; padding: 2px 32px 2px 8px; margin: 0; background-color: transparent; font-weight: bold; color: var(--md-primary); border-color: var(--md-primary);"></select>
           <div class="stats-badge"><span id="scan-stats-text">暂无索引数据</span></div>
         </div>
         <div style="margin-bottom: 16px;">
@@ -769,7 +734,11 @@
         <div class="mh-field" style="margin-bottom: 0; margin-top: 16px;">
           <label style="font-size: 14px; color: var(--md-on-surface);">自动定时后台扫描</label>
           <select id="auto-scan-select" class="mh-select">
-            <option value="0">关闭（仅手动扫描）</option><option value="6">每 6 小时扫描一次</option><option value="12">每 12 小时扫描一次</option><option value="24">每天扫描一次 (24h)</option><option value="168">每周扫描一次</option>
+            <option value="0">关闭（仅手动扫描）</option>
+            <option value="12">每 12 小时扫描一次</option>
+            <option value="24">每天扫描一次 (24h)</option>
+            <option value="72">每 3 天扫描一次 (72h)</option>
+            <option value="168">每周扫描一次</option>
           </select>
         </div>
       </div>
@@ -778,23 +747,28 @@
         <div class="card-title" style="display: flex; justify-content: flex-start; align-items: center; gap: 12px; margin-bottom: 16px;">
           <span>WebDAV 节点选择</span><button class="mh-btn" id="btn-show-add" style="height: 28px; padding: 0 10px; font-size: 13px;">➕ 新增节点</button>
         </div>
+
+        <!-- 🌟 2：把你的表单原模原样地重新添加并插到了按钮正下方！ -->
+        <div id="dav-edit-form" style="display: none; margin-bottom: 16px; padding: 16px; border: 1px dashed var(--md-outline-variant); border-radius: 8px; background: transparent;">
+          <div class="mh-field"><label>节点别名</label><input type="text" id="dav-name" class="mh-input" placeholder="例如：本地电脑"></div>
+          <div class="mh-field"><label>WebDAV 地址</label><input type="text" id="dav-url" class="mh-input" placeholder="例如：http://192.168.1.100:8080"></div>
+          <div style="display: flex; gap: 12px;">
+            <div class="mh-field" style="flex: 1;"><label>用户名</label><input type="text" id="dav-user" class="mh-input"></div>
+            <div class="mh-field" style="flex: 1;"><label>密码</label><input type="password" id="dav-pass" class="mh-input"></div>
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 12px;">
+            <button class="mh-btn" id="btn-cancel" style="flex: 1; border-color: var(--md-outline); color: var(--md-on-surface-variant);">取消</button>
+            <button class="mh-btn" id="btn-test" style="flex: 1; border-color: #f59e0b; color: #f59e0b;">测试连接</button>
+            <button class="mh-btn" id="btn-save" style="flex: 1; background: var(--md-primary); color: white;">保存节点</button>
+          </div>
+        </div>
+
         <div style="display: flex; gap: 12px; align-items: center;">
           <select id="dav-server-select" class="mh-select" style="flex: 1; margin: 0;"></select>
           <button class="mh-btn" id="btn-set-default">⭐ 设为默认</button>
           <button class="mh-btn mh-btn-danger" id="btn-delete" style="display:none;">🗑️ 删除</button>
         </div>
 
-        <div id="dav-edit-form" style="display: none;">
-          <div class="mh-divider"></div>
-          <div class="card-title" id="form-title" style="margin-bottom: 16px;">新增 WebDAV 节点</div>
-          <div class="mh-field"><label>别名 (如：阿里云盘)</label><input type="text" id="dav-name" class="mh-input"></div>
-          <div class="mh-field"><label>完整的 URL 地址</label><input type="url" id="dav-url" class="mh-input"></div>
-          <div class="mh-field"><label>账号用户名</label><input type="text" id="dav-user" class="mh-input"></div>
-          <div class="mh-field"><label>密码 / 授权应用码</label><input type="password" id="dav-pass" class="mh-input"></div>
-          <div style="display: flex; gap: 12px; align-items: center; margin-top: 12px;">
-            <button class="mh-btn" id="btn-save">💾 保存节点</button><button class="mh-btn" id="btn-test">⚡ 测试连通性</button><button class="mh-btn" id="btn-cancel">❌ 取消</button>
-          </div>
-        </div>
 
         <div>
           <div class="card-title" style="margin-bottom: 12px; margin-top: 16px;">扫库根目录配置</div>
@@ -1296,6 +1270,7 @@
                 console.log(`[状态检测] 页面加载完毕，当前对话监听为: ${isEnabled ? '已开启' : '已关闭'}`);
 
                 // 🌟 自动开启逻辑：检测到关闭时，立刻触发刚刚提取的函数，不加任何延迟
+              /*
                 if (!isEnabled) {
                     console.log(`[状态检测] 正在准备自动强制开启...`);
                     window.setConversationMonitorStatus(true, monitorToggle).then(success => {
@@ -1305,6 +1280,8 @@
                         }
                     });
                 }
+
+               */
             }
         }).catch(() => {});
 
