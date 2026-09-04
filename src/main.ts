@@ -115,14 +115,20 @@ function setupCommSyncListeners() {
     songloft.comm.onMessage("sync_webdav_data", async (payload, from) => {
         if (from !== TWIN_PLUGIN_ID) return;
         try {
+            // 处理 iWebPlayer 发来的删除指令
+            if (payload.type === 'delete' && payload.key) {
+                const key = payload.key;
+                if (typeof songloft.storage.removeItem === 'function') await songloft.storage.removeItem(key);
+                else if (typeof (songloft.storage as any).remove === 'function') await (songloft.storage as any).remove(key);
+                else if (typeof (songloft.storage as any).delete === 'function') await (songloft.storage as any).delete(key);
+                return;
+            }
+
             if (payload.type === 'config') {
                 let localKey = payload.key;
                 if (localKey === 'iwebplayer.webdav') localKey = 'webdav_config';
-
                 await safeStorageSet(localKey, payload.value);
-                if (localKey === 'xiaoai_dav_configs' || localKey === 'xiaoai_lx_configs') {
-                    rebuildVoiceRoutes();
-                }
+                if (localKey === 'xiaoai_dav_configs' || localKey === 'xiaoai_lx_configs') rebuildVoiceRoutes();
             }
             else if (payload.type === 'library' && payload.davId) {
                 await safeStorageSet(`webdav_lib_${payload.davId}`, typeof payload.library === 'string' ? payload.library : JSON.stringify(payload.library));
@@ -1129,6 +1135,29 @@ router.post('/store', async (req) => {
         }
         return jsonResponse({ ret: "OK" });
     } catch (e) { return jsonResponse({ error: String(e) }, 500); }
+});
+
+// 真正的物理删除接口 (供前端调用)
+router.delete('/store', async (req) => {
+    try {
+        // 🌟 修复 1：使用官方内置的 parseQuery，避免变成 [object Object]
+        const q = parseQuery(req.query);
+        const key = q.key as string;
+
+        if (!key) return jsonResponse({ error: "Missing key" }, 400);
+
+        // 执行物理删除
+        if (typeof songloft.storage.removeItem === 'function') await songloft.storage.removeItem(key);
+        else if (typeof (songloft.storage as any).remove === 'function') await (songloft.storage as any).remove(key);
+        else if (typeof (songloft.storage as any).delete === 'function') await (songloft.storage as any).delete(key);
+
+        // 删除成功后，广播告诉 iWebPlayer 也执行删除
+        songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", { type: 'delete', key: key }).catch(()=>{});
+
+        return jsonResponse({ ret: "OK" });
+    } catch (error) {
+        return jsonResponse({ error: "删除配置失败: " + String(error) }, 500);
+    }
 });
 
 setupWebDAVRoutes(router);

@@ -7,6 +7,7 @@ let scanStatus = 'idle'; // 'idle' | 'scanning' | 'completed' | 'failed'
 let scannedFoldersCount = 0;
 let activeDavId = '';
 let daemonStarted = false; // 守护进程是否已启动
+let isWebDavScanning = false; // 软锁防并发
 
 const AUDIO_EXTS = ['.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.ape', '.wma', '.alac'];
 
@@ -62,13 +63,18 @@ async function runScanTask(version: number, hostUrl: string, token: string, davI
                 const audioItems = [];
 
                 for (const item of items) {
+                    // 🌟 智能兜底：如果 name 为空，就强行从 id（完整路径）中提取最后一段作为真实名字
+                    const itemName = item.name || (item.id ? item.id.split('/').filter(Boolean).pop() : '') || '未知项';
+
                     if (item.type === 'directory') {
-                        const nextPath = currentPath === '/' ? '/' + item.name : `${currentPath}/${item.name}`;
+                        // 🌟 优先直接使用 id 作为下一次请求的绝对路径，如果没有 id 再自己拼接
+                        const nextPath = item.id || (currentPath === '/' ? '/' + itemName : `${currentPath}/${itemName}`);
                         queue.push(nextPath);
-                    } else if (item.type === 'file' && isAudioFile(item.name)) {
+                    } else if (item.type === 'file' && isAudioFile(itemName)) {
                         audioItems.push({
                             id: item.id || `dav_temp_${Date.now()}_${Math.random()}`,
-                            title: item.name.replace(/\.[^/.]+$/, ""),
+                            // 🌟 强制使用提取出来的 itemName 作为歌曲标题，并剥离后缀
+                            title: itemName.replace(/\.[^/.]+$/, ""),
                             artist: "未知歌手",
                             album: "",
                             duration: item.duration || 0,
@@ -117,7 +123,7 @@ async function runScanTask(version: number, hostUrl: string, token: string, davI
             await safeStorageSet(`webdav_lib_${davId}`, libraryJson);
 
             try {
-                // 2. 🌟 关键修复：统一使用 type: 'config' 和确切的 key 发送，与 router.post('/store') 保持绝对一致
+                // 2. 发送独立曲库更新给 iWebPlayer
                 await songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", {
                     type: 'config',
                     key: `webdav_lib_${davId}`,
@@ -133,9 +139,11 @@ async function runScanTask(version: number, hostUrl: string, token: string, davI
     }
 }
 
-// 🤖 静默后台定时扫描引擎
-async function checkAutoScan() {
-    if (scanStatus === 'scanning') return;
+// ==========================================
+// 🤖 极简版：静默后台定时扫描引擎 (附着于 webdav_config)
+// ==========================================
+async function checkAutoScanDaemon() {
+    if (isWebDavScanning || scanStatus === 'scanning') return;
 
     try {
         const token = await songloft.plugin.getToken();
@@ -147,52 +155,79 @@ async function checkAutoScan() {
         const servers = await res.json();
         if (!Array.isArray(servers)) return;
 
-        // 🌟 统一获取 webdav_config
+        // 统一读取整块大配置
         const configStr = await songloft.storage.get('webdav_config');
         let config: any = { settings: {}, roots: {} };
         if (configStr) {
-            try { config = JSON.parse(configStr); } catch (e) {}
+            try { config = typeof configStr === 'string' ? JSON.parse(configStr) : configStr; } catch (e) {}
         }
+        if (!config.settings) config.settings = {};
+
+        let isConfigChanged = false; // 标记是否需要保存
 
         for (const srv of servers) {
-            if (scanStatus === 'scanning') break;
+            if (isWebDavScanning) break;
             const davId = srv.name;
 
-            // 🌟 从 unified config 提取参数
             const intervalStr = config.settings[`auto_scan_interval_${davId}`] || '0';
             const intervalHours = parseInt(intervalStr, 10);
 
             if (intervalHours > 0) {
-                const libStr = await songloft.storage.get(`webdav_lib_${davId}`);
-                let lastScanMs = 0;
-                if (libStr) {
-                    try {
-                        const libObj = JSON.parse(libStr);
-                        if (libObj.time) {
-                            lastScanMs = new Date(libObj.time.replace(/-/g, '/')).getTime();
-                        }
-                    } catch (e) {}
-                }
+                // 直接从 settings 里读取起跑时间
+                const lastScanStr = config.settings[`last_scan_time_${davId}`] || '0';
+                let lastScanMs = parseInt(String(lastScanStr), 10);
 
                 const now = Date.now();
                 const targetIntervalMs = intervalHours * 60 * 60 * 1000;
 
-                if (!lastScanMs || (now - lastScanMs >= targetIntervalMs)) {
+                if (now - lastScanMs >= targetIntervalMs) {
                     songloft.log.info(`[WebDAV] 触发自动静默扫描: [${davId}]`);
-                    const rootPath = config.roots[davId] || '/';
 
+                    // 1. 更新大 JSON 里的时间戳，并打上变动标记
+                    config.settings[`last_scan_time_${davId}`] = now.toString();
+                    isConfigChanged = true;
+
+                    const rootPath = (config.roots && config.roots[davId]) ? config.roots[davId] : '/';
+
+                    isWebDavScanning = true;
+                    scanStatus = 'scanning';
                     currentScanVersion++;
                     activeDavId = davId;
-                    scanStatus = 'scanning';
                     scannedFoldersCount = 0;
 
-                    await runScanTask(currentScanVersion, hostUrl, token, davId, rootPath);
+                    // 异步调用底层扫库
+                    runScanTask(currentScanVersion, hostUrl, token, davId, rootPath).finally(() => {
+                        isWebDavScanning = false;
+                    });
                 }
             }
+        }
+
+        // 🌟 软锁保存与广播
+        if (isConfigChanged) {
+            const updatedConfigStr = JSON.stringify(config);
+            await songloft.storage.set('webdav_config', updatedConfigStr);
+            try {
+                await songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", {
+                    type: 'config',
+                    key: 'iwebplayer.webdav',
+                    value: updatedConfigStr
+                });
+            } catch(e) {}
         }
     } catch (e) {
         songloft.log.error('[WebDAV] 定时扫描守护进程异常: ' + String(e));
     }
+}
+
+// 暴露守护进程的启动器（供 main.ts 的 onInit 中调用）
+export function startWebDavAutoScanDaemon() {
+    setTimeout(() => {
+        checkAutoScanDaemon().catch(() => {});
+        setInterval(() => {
+            checkAutoScanDaemon().catch(() => {});
+        }, 5 * 60 * 1000);
+    }, 30 * 1000);
 }
 
 // ==========================================
@@ -222,7 +257,6 @@ export async function searchWebDavSongs(nodeName: string, keyword: string, logFn
 
         const libStr = await songloft.storage.get(`webdav_lib_${realNode}`);
 
-        // 🌟 在这里大声喊出未建立索引，并返回 null 中断流程
         if (!libStr) {
             logFn(`⚠️ WebDAV 节点 [${realNode}] 尚未建立曲库索引，请前往面板点击【建立全库索引】！`);
             return null;
@@ -267,16 +301,7 @@ export function setupWebDAVRoutes(router: any) {
     // 启动守护进程 (单例锁)
     if (!daemonStarted) {
         daemonStarted = true;
-        // 每 15 分钟醒来检查一次是否需要执行任务
-        setInterval(() => {
-            checkAutoScan().catch(() => {});
-        }, 15 * 60 * 1000);
-
-        // 插件刚启动时，延迟 1.5 分钟进行首次检查（错开宿主高负载启动期）
-        setTimeout(() => {
-            checkAutoScan().catch(() => {});
-        }, 90 * 1000);
-
+        startWebDavAutoScanDaemon();
         songloft.log.info('[WebDAV] 自动定时扫描守护进程已启动');
     }
 
