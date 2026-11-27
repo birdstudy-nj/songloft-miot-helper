@@ -18,12 +18,48 @@ function isAudioFile(filename: string): boolean {
 
 const TWIN_PLUGIN_ID = 'iwebplayer';
 
-// 安全写库助手
+// 安全读写库助手
 async function safeStorageSet(key: string, val: string) {
     if (typeof songloft.storage.set === 'function') {
         await songloft.storage.set(key, val);
     } else if (typeof (songloft.storage as any).setItem === 'function') {
         await (songloft.storage as any).setItem(key, val);
+    }
+}
+
+async function safeStorageGet(key: string) {
+    if (typeof songloft.storage.get === 'function') {
+        return await songloft.storage.get(key);
+    } else if (typeof (songloft.storage as any).getItem === 'function') {
+        return await (songloft.storage as any).getItem(key);
+    }
+    return null;
+}
+
+// 🌟 UTF-8 请求体安全解析器（防止中文节点名与文件夹名乱码）
+function parseRequestBody(req: HTTPRequest): any {
+    if (!req.body) return {};
+    try {
+        if (typeof req.body === 'string') return JSON.parse(req.body);
+        const bytes = req.body as Uint8Array;
+        const TD = (globalThis as any).TextDecoder;
+        if (TD) return JSON.parse(new TD('utf-8').decode(bytes));
+
+        let out = '', i = 0;
+        const len = bytes.length;
+        while (i < len) {
+            const c = bytes[i++];
+            if (c < 0x80) out += String.fromCharCode(c);
+            else if (c < 0xE0) out += String.fromCharCode(((c & 0x1F) << 6) | (bytes[i++] & 0x3F));
+            else if (c < 0xF0) out += String.fromCharCode(((c & 0x0F) << 12) | ((bytes[i++] & 0x3F) << 6) | (bytes[i++] & 0x3F));
+            else {
+                const u = (((c & 0x07) << 18) | ((bytes[i++] & 0x3F) << 12) | ((bytes[i++] & 0x3F) << 6) | (bytes[i++] & 0x3F)) - 0x10000;
+                out += String.fromCharCode(0xD800 + (u >> 10), 0xDC00 + (u & 0x3FF));
+            }
+        }
+        return JSON.parse(out);
+    } catch (e) {
+        return {};
     }
 }
 
@@ -39,11 +75,67 @@ function getFormattedTime(): string {
     return `${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`;
 }
 
+// 🌟 WebDAV 文件夹歌曲通用排序器 (与 iWebPlayer 保持完全一致)
+function sortDavSongs(songs: any[], rule?: { type?: string; order?: string }) {
+    if (!Array.isArray(songs) || songs.length <= 1 || !rule || !rule.type || rule.type === 'random') return;
+    const { type, order = 'asc' } = rule;
+
+    const cleanArtist = (v: any): string => {
+        const s = v ? String(v).trim() : '';
+        return (s === '未知歌手' || s === '未知') ? '' : s;
+    };
+    const getFileName = (idVal: any): string => {
+        if (!idVal) return '';
+        const str = String(idVal).trim();
+        if (!str || str.startsWith('dav_temp_')) return '';
+        return str.split('/').pop() || '';
+    };
+    const compareStr = (a: string, b: string): number => {
+        try { return a.localeCompare(b, 'zh-CN'); }
+        catch (e) { return a.localeCompare(b); }
+    };
+
+    songs.sort((a, b) => {
+        let valA = '', valB = '';
+        if (type === 'name') {
+            valA = getFileName(a.id);
+            valB = getFileName(b.id);
+        } else if (type === 'song') {
+            valA = a.title ? String(a.title).trim() : '';
+            valB = b.title ? String(b.title).trim() : '';
+        } else if (type === 'artist') {
+            valA = cleanArtist(a.artist);
+            valB = cleanArtist(b.artist);
+        } else {
+            return 0;
+        }
+
+        // 缺失项（含“未知歌手”）统一沉底
+        if (!valA && valB) return 1;
+        if (valA && !valB) return -1;
+        if (!valA && !valB) return 0;
+
+        return order === 'asc' ? compareStr(valA, valB) : compareStr(valB, valA);
+    });
+}
+
 // 🌐 异步递归扫描核心 (手动与自动共用)
 async function runScanTask(version: number, hostUrl: string, token: string, davId: string, rootPath: string) {
     const queue: string[] = [rootPath];
     const resultLibrary: Record<string, any[]> = {};
     let lastWriteTime = Date.now();
+
+    // 🌟 1. 扫描前先读取旧曲库中的 sorts 排序记录 (含 iWebPlayer 推送过来的排序规则)
+    let savedSorts: Record<string, { type: string; order: string }> = {};
+    try {
+        const oldCacheRaw = await safeStorageGet(`webdav_lib_${davId}`);
+        if (oldCacheRaw) {
+            const oldCache = typeof oldCacheRaw === 'string' ? JSON.parse(oldCacheRaw) : oldCacheRaw;
+            if (oldCache && oldCache.sorts && typeof oldCache.sorts === 'object') {
+                savedSorts = oldCache.sorts;
+            }
+        }
+    } catch (e) {}
 
     try {
         while (queue.length > 0) {
@@ -90,30 +182,53 @@ async function runScanTask(version: number, hostUrl: string, token: string, davI
 
                 if (audioItems.length > 0) {
                     let plName = currentPath === '/' ? '根目录' : currentPath.split('/').pop() || '未知文件夹';
+                    // 🌟 2. 若该文件夹有历史排序记录，当场按记录排好序
+                    if (savedSorts[plName]) {
+                        sortDavSongs(audioItems, savedSorts[plName]);
+                    }
                     resultLibrary[plName] = audioItems;
                     scannedFoldersCount++;
                 }
 
-                // 心跳写入
+                // ⏱️ 3秒心跳批处理写入：保留完整结构与 sorts，避免中途中断冲丢排序记录
                 if (Date.now() - lastWriteTime > 3000) {
-                    await safeStorageSet(`webdav_lib_${davId}`, JSON.stringify(resultLibrary));
+                    let totalSongs = 0;
+                    for (const list of Object.values(resultLibrary)) totalSongs += list.length;
+
+                    const partialLib = {
+                        folders: Object.keys(resultLibrary).length,
+                        songs: totalSongs,
+                        time: getFormattedTime().slice(0, 16),
+                        sorts: savedSorts,
+                        library: resultLibrary
+                    };
+                    await safeStorageSet(`webdav_lib_${davId}`, JSON.stringify(partialLib));
                     lastWriteTime = Date.now();
                 }
             } catch (err) { songloft.log.error(`[WebDAV] 扫描出错 ${currentPath}: ` + String(err)); }
         }
 
         // ==========================================
-        // 🌟 扫描结束：更新统计并广播 (避免二次转义)
+        // 🌟 扫描结束：清理已删目录排序、更新统计并广播
         // ==========================================
         if (currentScanVersion === version) {
             let totalSongs = 0;
             const folders = Object.keys(resultLibrary);
-            for (const folder of folders) { totalSongs += resultLibrary[folder].length; }
+            const cleanedSorts: Record<string, { type: string; order: string }> = {};
+
+            for (const folder of folders) {
+                if (savedSorts[folder]) {
+                    cleanedSorts[folder] = savedSorts[folder];
+                    sortDavSongs(resultLibrary[folder], cleanedSorts[folder]);
+                }
+                totalSongs += resultLibrary[folder].length;
+            }
 
             const compositeLib = {
                 folders: folders.length,
                 songs: totalSongs,
                 time: getFormattedTime().slice(0, 16),
+                sorts: cleanedSorts,
                 library: resultLibrary
             };
 
@@ -156,7 +271,7 @@ async function checkAutoScanDaemon() {
         if (!Array.isArray(servers)) return;
 
         // 统一读取整块大配置
-        const configStr = await songloft.storage.get('webdav_config');
+        const configStr = await safeStorageGet('webdav_config');
         let config: any = { settings: {}, roots: {} };
         if (configStr) {
             try { config = typeof configStr === 'string' ? JSON.parse(configStr) : configStr; } catch (e) {}
@@ -206,7 +321,7 @@ async function checkAutoScanDaemon() {
         // 🌟 软锁保存与广播
         if (isConfigChanged) {
             const updatedConfigStr = JSON.stringify(config);
-            await songloft.storage.set('webdav_config', updatedConfigStr);
+            await safeStorageSet('webdav_config', updatedConfigStr);
             try {
                 await songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", {
                     type: 'config',
@@ -231,14 +346,14 @@ export function startWebDavAutoScanDaemon() {
 }
 
 // ==========================================
-// 🔍 新增：专属 WebDAV 搜歌函数 (含 500 首防爆限制)
+// 🔍 专属 WebDAV 搜歌函数 (含 500 首防爆限制)
 // ==========================================
 export async function searchWebDavSongs(nodeName: string, keyword: string, logFn: (msg: string) => void): Promise<any[] | null> {
     try {
         let realNode = nodeName;
         if (nodeName === 'default') {
             try {
-                const cfgRaw = await songloft.storage.get('webdav_config');
+                const cfgRaw = await safeStorageGet('webdav_config');
                 if (cfgRaw) {
                     const cfg = typeof cfgRaw === 'string' ? JSON.parse(cfgRaw) : cfgRaw;
                     realNode = cfg?.settings?.default_server || '';
@@ -255,14 +370,14 @@ export async function searchWebDavSongs(nodeName: string, keyword: string, logFn
             return null;
         }
 
-        const libStr = await songloft.storage.get(`webdav_lib_${realNode}`);
+        const libRaw = await safeStorageGet(`webdav_lib_${realNode}`);
 
-        if (!libStr) {
+        if (!libRaw) {
             logFn(`⚠️ WebDAV 节点 [${realNode}] 尚未建立曲库索引，请前往面板点击【建立全库索引】！`);
             return null;
         }
 
-        const libData = JSON.parse(libStr);
+        const libData = typeof libRaw === 'string' ? JSON.parse(libRaw) : libRaw;
         const library = libData.library || {};
 
         if (Object.keys(library).length === 0) {
@@ -306,10 +421,7 @@ export function setupWebDAVRoutes(router: any) {
     }
 
     router.post('/dav/scan', async (req: HTTPRequest) => {
-        let data: any = {};
-        if (req.body) {
-            try { data = JSON.parse(typeof req.body === 'string' ? req.body : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array))); } catch(e){}
-        }
+        const data = parseRequestBody(req);
         const davId = data.davId;
         const rootPath = data.rootPath;
         if (!davId || !rootPath) return jsonResponse({ error: "Missing parameters" }, 400);
@@ -320,9 +432,37 @@ export function setupWebDAVRoutes(router: any) {
         currentScanVersion++;
         activeDavId = davId;
         scanStatus = 'scanning';
+        isWebDavScanning = true;
         scannedFoldersCount = 0;
 
-        runScanTask(currentScanVersion, hostUrl, token, davId, rootPath).catch(() => {});
+        // ====== 🌟 手动扫库同步更新 last_scan_time 并广播给 iWebPlayer ======
+        try {
+            const now = Date.now();
+            const configStr = await safeStorageGet('webdav_config');
+            let config: any = { settings: {}, roots: {} };
+            if (configStr) {
+                try {
+                    const parsed = typeof configStr === 'string' ? JSON.parse(configStr) : configStr;
+                    if (parsed && parsed.settings) config.settings = parsed.settings;
+                    if (parsed && parsed.roots) config.roots = parsed.roots;
+                } catch (e) {}
+            }
+            config.settings[`last_scan_time_${davId}`] = now.toString();
+            const updatedConfigStr = JSON.stringify(config);
+
+            await safeStorageSet('webdav_config', updatedConfigStr);
+            await songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", {
+                type: 'config',
+                key: 'iwebplayer.webdav',
+                value: updatedConfigStr
+            });
+        } catch (e) {}
+        // ================================================================
+
+        runScanTask(currentScanVersion, hostUrl, token, davId, rootPath)
+            .catch(() => {})
+            .finally(() => { isWebDavScanning = false; });
+
         return jsonResponse({ status: "scanning", version: currentScanVersion });
     });
 
@@ -337,7 +477,7 @@ export function setupWebDAVRoutes(router: any) {
             if (match) davId = decodeURIComponent(match[1]);
         }
         if (!davId) return jsonResponse({ error: "Missing davId" }, 400);
-        const cache = await songloft.storage.get(`webdav_lib_${davId}`);
-        return jsonResponse(cache ? JSON.parse(cache) : {});
+        const cache = await safeStorageGet(`webdav_lib_${davId}`);
+        return jsonResponse(cache ? (typeof cache === 'string' ? JSON.parse(cache) : cache) : {});
     });
 }

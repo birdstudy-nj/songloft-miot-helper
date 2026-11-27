@@ -1714,7 +1714,7 @@ router.post('/store', async (req) => {
         let syncKey = key;
         if (key === 'webdav_config') syncKey = 'iwebplayer.webdav';
 
-        if (key === 'webdav_config' || key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs' || key === 'xiaoai_mf_configs' || key.startsWith('webdav_lib_')) {
+        if (key === 'webdav_config' || key === 'xiaoai_dav_configs' || key === 'xiaoai_lx_configs' || key === 'xiaoai_mf_configs' || key === 'lxmusic_source_urls' || key.startsWith('webdav_lib_')) {
             songloft.comm.send(TWIN_PLUGIN_ID, "sync_webdav_data", { type: 'config', key: syncKey, value: value }).catch(()=>{});
         }
         return jsonResponse({ ret: "OK" });
