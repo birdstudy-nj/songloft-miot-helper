@@ -262,14 +262,46 @@
   }
 
   // ==========================================
-  // 模块 C：LXMusic 源管理
+  // 模块 C：LXMusic 源管理（含 URL 记录与刷新）
   // ==========================================
+  const LX_SOURCE_URLS_KEY = 'lxmusic_source_urls';
+  let lxSourceUrls = {};
+
+  function escapeAttr(str) {
+      return String(str == null ? '' : str).replace(/"/g, '&quot;');
+  }
+
+  async function loadLxSourceUrls() {
+      try {
+          const res = await apiGet('/store?key=' + LX_SOURCE_URLS_KEY);
+          if (res && res.data && res.data !== 'null' && res.data !== '[]') {
+              const parsed = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  lxSourceUrls = parsed;
+                  return;
+              }
+          }
+      } catch (e) {}
+      lxSourceUrls = {};
+  }
+
+  async function saveLxSourceUrls() {
+      try {
+          await apiPost('/store', { key: LX_SOURCE_URLS_KEY, value: JSON.stringify(lxSourceUrls) });
+      } catch (e) {
+          console.warn('保存 LXMusic 源 URL 映射失败:', e);
+      }
+  }
+
   async function loadLxSources() {
     const listEl = document.getElementById('lx-sources-list');
     if (!listEl) return;
 
     try {
-      const res = await fetch('/api/v1/jsplugin/lxmusic/api/sources', { headers: getJsonHeaders() });
+      const [res] = await Promise.all([
+          fetch('/api/v1/jsplugin/lxmusic/api/sources', { headers: getJsonHeaders() }),
+          loadLxSourceUrls()
+      ]);
 
       // 🌟 拦截 LXMusic 页的 403 报错
       if (res.status === 403) {
@@ -285,6 +317,17 @@
       const responseJson = await res.json();
       const sources = responseJson?.data?.list || [];
 
+      // 🌟 清理孤儿记录（用户可能在 LXMusic 原生页删除了某些源）
+      const validIds = new Set(sources.map(s => s.id));
+      let urlsChanged = false;
+      Object.keys(lxSourceUrls).forEach(id => {
+          if (!validIds.has(id)) {
+              delete lxSourceUrls[id];
+              urlsChanged = true;
+          }
+      });
+      if (urlsChanged) saveLxSourceUrls();
+
       if (sources.length === 0) { listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--md-on-surface-variant); font-size: 13px;">暂未导入任何源脚本。</div>'; return; }
 
       const platMap = { wy: '网易云', tx: 'QQ音乐', kg: '酷狗', kw: '酷我', mg: '咪咕' };
@@ -292,6 +335,15 @@
       listEl.innerHTML = sources.map(src => {
         const platformsStr = (src.platforms || []).map(p => platMap[p] || p).join('、');
         const descText = platformsStr ? `支持平台: ${platformsStr}` : '无平台信息';
+        const safeId = escapeAttr(src.id);
+        const safeVer = escapeAttr(src.version || '');
+        const sourceUrl = lxSourceUrls[src.id];
+        const hasUrl = typeof sourceUrl === 'string' && /^https?:\/\//i.test(sourceUrl);
+
+        // 仅 URL 导入的源显示刷新按钮
+        const refreshBtnHtml = hasUrl
+            ? `<button class="mh-source-del-btn btn-refresh-lx-source" data-id="${safeId}" data-version="${safeVer}" style="background: var(--md-primary-container, #d3e3fd) !important; color: var(--md-primary, #0b57d0) !important; border-color: rgba(11, 87, 208, 0.25) !important; margin-left: 0;" title="${escapeAttr(sourceUrl)}">🔄</button>`
+            : '';
 
         return `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid var(--md-outline-variant);">
@@ -299,12 +351,13 @@
             <div style="font-size: 14px; font-weight: bold; margin-bottom: 4px; color: var(--md-on-surface);">${src.name} <span style="font-weight:normal; color:var(--md-primary); font-size:12px; margin-left:4px;">${src.version || ''}</span></div>
             <div style="font-size: 12px; color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${descText}</div>
           </div>
-          <div style="display: flex; gap: 12px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
             <label class="lx-switch">
-              <input type="checkbox" class="lx-toggle-source" data-id="${src.id}" ${src.enabled ? 'checked' : ''}>
+              <input type="checkbox" class="lx-toggle-source" data-id="${safeId}" ${src.enabled ? 'checked' : ''}>
               <span class="lx-slider"></span>
             </label>
-            <button class="mh-source-del-btn btn-delete-lx-source" data-id="${src.id}" title="删除此源">🗑️</button>
+            ${refreshBtnHtml}
+            <button class="mh-source-del-btn btn-delete-lx-source" data-id="${safeId}" style="margin-left: 0;" title="删除此源">🗑️</button>
           </div>
         </div>
         `;
@@ -318,10 +371,69 @@
           });
       });
 
+      document.querySelectorAll('.btn-refresh-lx-source').forEach(el => {
+          el.addEventListener('click', async (e) => {
+              const btn = e.currentTarget;
+              const id = btn.dataset.id;
+              const oldVer = btn.dataset.version || '';
+              const targetUrl = lxSourceUrls[id];
+              if (!targetUrl) return alert('⚠️ 未找到该源的导入地址');
+
+              const oldText = btn.innerText;
+              btn.innerText = '⏳';
+              btn.style.pointerEvents = 'none';
+
+              try {
+                  const r = await fetch('/api/v1/jsplugin/lxmusic/api/sources/import-url', {
+                      method: 'POST',
+                      headers: getJsonHeaders(),
+                      body: JSON.stringify({ url: targetUrl })
+                  });
+                  if (r && r.ok) {
+                      const data = await r.json();
+                      if (data.code === 0) {
+                          const newId = data.data?.id;
+                          const newName = data.data?.name || id;
+                          const newVer = data.data?.version || '';
+
+                          // 若远端脚本更新后变更了 id，同步记录新 id 的 URL
+                          if (newId && newId !== id) {
+                              lxSourceUrls[newId] = targetUrl;
+                              await saveLxSourceUrls();
+                          }
+
+                          const verTip = (oldVer && newVer && oldVer !== newVer)
+                              ? `\n版本：${oldVer} ➔ ${newVer}`
+                              : (newVer ? `\n当前版本：${newVer}` : '');
+                          alert(`✅ 源 [${newName}] 刷新成功并已启用！${verTip}\n链接：${targetUrl}`);
+                          await loadLxSources();
+                      } else {
+                          alert(`❌ 刷新失败: ${data.msg || '未知错误'}`);
+                      }
+                  } else {
+                      alert('❌ 刷新失败，源文件地址可能已失效');
+                  }
+              } catch (err) {
+                  alert('❌ 刷新发生网络异常: ' + err.message);
+              } finally {
+                  btn.innerText = oldText;
+                  btn.style.pointerEvents = 'auto';
+              }
+          });
+      });
+
       document.querySelectorAll('.btn-delete-lx-source').forEach(el => {
           el.addEventListener('click', async (e) => {
+              const id = e.currentTarget.dataset.id;
               if (!confirm('确定彻底删除该源脚本吗？')) return;
-              try { await fetch(`/api/v1/jsplugin/lxmusic/api/sources?id=${encodeURIComponent(e.target.dataset.id)}`, { method: 'DELETE', headers: getJsonHeaders() }); loadLxSources(); }
+              try {
+                  const r = await fetch(`/api/v1/jsplugin/lxmusic/api/sources?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: getJsonHeaders() });
+                  if (r.ok && lxSourceUrls[id]) {
+                      delete lxSourceUrls[id];
+                      await saveLxSourceUrls();
+                  }
+                  loadLxSources();
+              }
               catch(err) { alert("删除失败"); }
           });
       });
@@ -377,13 +489,15 @@
                   if (res && res.ok) {
                       const data = await res.json();
                       if (data.code === 0) {
+                          if (data.data?.id) {
+                              lxSourceUrls[data.data.id] = targetUrl;
+                              await saveLxSourceUrls();
+                          }
                           alert(`✅ URL 脚本 [${data.data?.name || '未知'}] 导入成功！`);
                           loadLxSources(); // 刷新列表
                       } else {
                           alert(`❌ 导入失败: ${data.msg || '未知错误'}`);
                       }
-                  } else {
-                      alert("❌ 导入失败，请检查 URL 地址是否有效或查看后端日志");
                   }
               } catch(err) {
                   alert("❌ 导入过程发生网络异常: " + err.message);
